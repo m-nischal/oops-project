@@ -3,6 +3,7 @@ import dbConnect from "../../../lib/dbConnect";
 import User from "../../../models/User";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
+import cookie from "cookie";
 
 const JWT_SECRET = process.env.JWT_SECRET || "dev_jwt_secret";
 const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || "7d";
@@ -20,12 +21,11 @@ export default async function handler(req, res) {
 
   const normalizedEmail = String(email).toLowerCase().trim();
   try {
-    const user = await User.findOne({ email: normalizedEmail }).select("+password"); // ensure password field is selected if schema marks select:false
+    const user = await User.findOne({ email: normalizedEmail }).select("+password");
     if (!user) {
       return res.status(401).json({ ok: false, message: "Invalid credentials" });
     }
 
-    // If password stored as undefined/empty, reject
     if (!user.password) {
       return res.status(401).json({ ok: false, message: "No password set for this account. Please use OTP login." });
     }
@@ -36,6 +36,37 @@ export default async function handler(req, res) {
     }
 
     const token = signToken(user);
+
+    // Set HttpOnly cookie named "token"
+    // cookie expiry aligned with JWT expiry (approx)
+    const maxAgeSeconds = (() => {
+      // try parse common formats like "7d", "24h" -- fallback to 7 days
+      if (!process.env.JWT_EXPIRES_IN) return 7 * 24 * 60 * 60;
+      const v = process.env.JWT_EXPIRES_IN;
+      const m = v.match(/^(\d+)([dhm])$/);
+      if (m) {
+        const amount = Number(m[1]);
+        if (m[2] === "d") return amount * 24 * 60 * 60;
+        if (m[2] === "h") return amount * 60 * 60;
+        if (m[2] === "m") return amount * 60;
+      }
+      // fallback: if numeric string (seconds)
+      const maybeNum = Number(v);
+      if (!isNaN(maybeNum)) return maybeNum;
+      return 7 * 24 * 60 * 60;
+    })();
+
+    const cookieOptions = {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "lax",
+      path: "/",
+      maxAge: maxAgeSeconds
+    };
+
+    res.setHeader("Set-Cookie", cookie.serialize("token", token, cookieOptions));
+
+    // Keep the same JSON response for backward compatibility (token included)
     return res.status(200).json({ ok: true, token, user: { id: user._id, email: user.email, role: user.role } });
   } catch (err) {
     console.error("Login error:", err);

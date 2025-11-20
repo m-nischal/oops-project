@@ -7,14 +7,14 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
   const [message, setMessage] = useState("");
 
-  // Redirect if already logged in (run only on client)
+  // Redirect if already logged in (client-only)
   useEffect(() => {
     if (typeof window !== "undefined") {
       redirectIfLoggedIn();
     }
   }, []);
 
-  function isProbablyEmail(value) {
+  function isEmail(value) {
     return typeof value === "string" && value.includes("@") && value.indexOf("@") > 0;
   }
 
@@ -23,8 +23,8 @@ export default function LoginPage() {
     setMessage("");
 
     const trimmedEmail = email.trim().toLowerCase();
-    if (!isProbablyEmail(trimmedEmail)) {
-      setMessage("Please enter a valid email address.");
+    if (!isEmail(trimmedEmail)) {
+      setMessage("Please enter a valid email.");
       return;
     }
 
@@ -33,46 +33,54 @@ export default function LoginPage() {
       return;
     }
 
-    const body = {
-      email: trimmedEmail,
-      password,
-    };
-
     try {
       const res = await fetch("/api/auth/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
+        credentials: "include", // store httpOnly cookie
+        body: JSON.stringify({ email: trimmedEmail, password })
       });
 
       const data = await res.json();
 
       if (!data.ok) {
-        setMessage(data.message || "Login failed");
+        setMessage(data.message || "Invalid login");
         return;
       }
 
-      // Save token
-      localStorage.setItem("token", data.token);
-
-      // Redirect by role
-      try {
-        const payload = JSON.parse(atob(data.token.split(".")[1]));
-        if (payload.role === "RETAILER") window.location.href = "/retailer/dashboard";
-        else if (payload.role === "WHOLESALER") window.location.href = "/wholesaler/dashboard";
-        else window.location.href = "/customer/home";
-      } catch (err) {
-        // fallback redirect
-        window.location.href = "/";
+      // legacy storage — optional
+      if (data.token) {
+        try { localStorage.setItem("token", data.token); } catch (_) {}
       }
+
+      // Determine role
+      let role = null;
+
+      // From token payload
+      if (data.token) {
+        try {
+          const payload = JSON.parse(atob(data.token.split(".")[1]));
+          role = payload.role?.toUpperCase();
+        } catch (_) {}
+      }
+
+      // fallback
+      if (!role && data.user?.role) role = data.user.role.toUpperCase();
+
+      // redirect by role
+      if (role === "RETAILER") window.location.href = "/retailer/dashboard";
+      else if (role === "WHOLESALER") window.location.href = "/wholesaler/dashboard";
+      else if (role === "DELIVERY") window.location.href = "/delivery/assigned";
+      else window.location.href = "/customer/home";
+
     } catch (err) {
       console.error("Login error:", err);
-      setMessage("Network error. Please try again.");
+      setMessage("Network error — please try again.");
     }
   }
 
   return (
-    <div style={{ padding: "20px" }}>
+    <div style={{ padding: 24 }}>
       <h2>Login</h2>
 
       <form onSubmit={handleLogin}>
@@ -81,8 +89,7 @@ export default function LoginPage() {
           placeholder="Email"
           value={email}
           onChange={(e) => setEmail(e.target.value)}
-          required
-          style={{ display: "block", marginBottom: "10px", width: "250px" }}
+          style={{ display: "block", marginBottom: 10 }}
         />
 
         <input
@@ -90,26 +97,17 @@ export default function LoginPage() {
           placeholder="Password"
           value={password}
           onChange={(e) => setPassword(e.target.value)}
-          required
-          style={{ display: "block", marginBottom: "10px", width: "250px" }}
+          style={{ display: "block", marginBottom: 10 }}
         />
 
         <button type="submit">Login</button>
 
-        {/* Always-visible forgot-password link (placed under the button) */}
-        <div style={{ marginTop: "10px" }}>
-          <a href="/forgot-password" style={{ color: "blue" }}>
-            Forgot Password? Reset using email OTP
-          </a>
+        <div style={{ marginTop: 10 }}>
+          <a href="/forgot-password">Forgot password?</a>
         </div>
       </form>
 
-      {message && <div style={{ color: "red", marginTop: "10px" }}>{message}</div>}
-
-      <hr />
-
-      <h3>Or login with Google</h3>
-      <a href="/api/auth/signin">Sign in with Google</a>
+      {message && <div style={{ color: "red", marginTop: 10 }}>{message}</div>}
     </div>
   );
 }
