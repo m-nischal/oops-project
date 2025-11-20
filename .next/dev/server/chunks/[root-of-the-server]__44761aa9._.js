@@ -357,6 +357,46 @@ const WarehouseSchema = new Schema({
 }, {
     _id: false
 });
+// --- NEW SCHEMA: ManufacturedAtSchema ---
+// Uses the same structure as a warehouse location, but without leadTimeDays
+const ManufacturedAtSchema = new Schema({
+    name: {
+        type: String
+    },
+    address: {
+        type: String
+    },
+    city: {
+        type: String
+    },
+    state: {
+        type: String
+    },
+    country: {
+        type: String
+    },
+    pincode: {
+        type: String
+    },
+    location: {
+        type: {
+            type: String,
+            enum: [
+                'Point'
+            ],
+            default: 'Point'
+        },
+        coordinates: {
+            type: [
+                Number
+            ],
+            default: undefined
+        }
+    }
+}, {
+    _id: false
+});
+// ----------------------------------------
 const ProductDetailsSchema = new Schema({
     materialComposition: {
         type: String
@@ -388,7 +428,6 @@ const ProductDetailsSchema = new Schema({
 /* --- Main Product Schema --- */ const ProductSchema = new Schema({
     // --- NEW FIELD ---
     // Tracks who owns this product document (Retailer or Wholesaler).
-    // This will point to your 'User' model.
     ownerId: {
         type: Schema.Types.ObjectId,
         ref: 'User',
@@ -404,6 +443,12 @@ const ProductDetailsSchema = new Schema({
         default: null,
         index: true
     },
+    // --- NEW FIELD: Manufactured At Location ---
+    manufacturedAt: {
+        type: ManufacturedAtSchema,
+        default: null
+    },
+    // -------------------------------------------
     /* --- Existing Fields --- */ name: {
         type: String,
         required: true,
@@ -478,7 +523,7 @@ const ProductDetailsSchema = new Schema({
 /**
  * get best delivery estimate
  */ ProductSchema.methods.estimateDeliveryTo = function(customerLocation = {}) {
-    // ... (your existing method logic) ...
+    // ... (existing logic) ...
     const whs = this.warehouses || [];
     if (!whs.length) return {
         estimatedDays: null,
@@ -519,7 +564,7 @@ const ProductDetailsSchema = new Schema({
 /**
  * STATIC HELPER: computeTotalStockForPlainObject
  */ ProductSchema.statics.computeTotalStockForPlainObject = function(productPlain = {}) {
-    // ... (your existing static logic) ...
+    // ... (existing logic) ...
     if (!productPlain) return 0;
     if (typeof productPlain.totalStock === "number" && Array.isArray(productPlain.sizes) === false) {
         return productPlain.totalStock;
@@ -536,7 +581,7 @@ const ProductDetailsSchema = new Schema({
 /**
  * OPTIONAL STATIC HELPER: recalculateAndPersist
  */ ProductSchema.statics.recalculateAndPersist = async function(productId) {
-    // ... (your existing static logic) ...
+    // ... (existing logic) ...
     if (!productId) throw new Error("productId required");
     const Product = this;
     const doc = await Product.findById(productId);
@@ -557,6 +602,67 @@ __turbopack_context__.s([
 ]);
 var __TURBOPACK__imported__module__$5b$externals$5d2f$mongoose__$5b$external$5d$__$28$mongoose$2c$__cjs$29$__ = __turbopack_context__.i("[externals]/mongoose [external] (mongoose, cjs)");
 ;
+const { Schema } = __TURBOPACK__imported__module__$5b$externals$5d2f$mongoose__$5b$external$5d$__$28$mongoose$2c$__cjs$29$__["default"]; // Destructure Schema for use in sub-schema
+// --- UPDATED SUB-SCHEMA: Address (Updated for Geo-location and full name) ---
+const addressSchema = new Schema({
+    label: {
+        type: String,
+        default: "Home"
+    },
+    firstName: {
+        type: String
+    },
+    lastName: {
+        type: String
+    },
+    addressLine1: {
+        type: String,
+        required: true
+    },
+    addressLine2: {
+        type: String
+    },
+    city: {
+        type: String,
+        required: true
+    },
+    state: {
+        type: String
+    },
+    pincode: {
+        type: String
+    },
+    country: {
+        type: String,
+        required: true
+    },
+    phone: {
+        type: String
+    },
+    countryCode: {
+        type: String,
+        default: "+91"
+    },
+    // NEW: GeoJSON structure for map display and future distance queries
+    location: {
+        type: {
+            type: String,
+            enum: [
+                'Point'
+            ],
+            default: 'Point'
+        },
+        coordinates: {
+            type: [
+                Number
+            ],
+            default: undefined
+        }
+    }
+}, {
+    _id: true
+});
+// --- END UPDATED SUB-SCHEMA ---
 const userSchema = new __TURBOPACK__imported__module__$5b$externals$5d2f$mongoose__$5b$external$5d$__$28$mongoose$2c$__cjs$29$__["default"].Schema({
     name: {
         type: String
@@ -565,19 +671,17 @@ const userSchema = new __TURBOPACK__imported__module__$5b$externals$5d2f$mongoos
         type: String,
         index: true,
         sparse: true,
-        unique: false
-    },
-    phone: {
-        type: String,
-        index: true,
-        sparse: true,
-        unique: false
+        unique: true
     },
     password: {
-        type: String
+        type: String,
+        select: false
     },
     oauthProvider: String,
     oauthId: String,
+    phone: {
+        type: String
+    },
     role: {
         type: String,
         enum: [
@@ -594,7 +698,19 @@ const userSchema = new __TURBOPACK__imported__module__$5b$externals$5d2f$mongoos
     otp: {
         code: String,
         expiresAt: Date
-    }
+    },
+    resetOtp: {
+        type: String
+    },
+    resetOtpExpiry: {
+        type: Number
+    },
+    resetAttempts: {
+        type: Number
+    },
+    addresses: [
+        addressSchema
+    ]
 }, {
     timestamps: true
 });

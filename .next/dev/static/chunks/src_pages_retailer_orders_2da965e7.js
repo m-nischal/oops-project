@@ -9,7 +9,7 @@
   "static/chunks/node_modules_next_5cb05f67._.js",
   "static/chunks/node_modules_react-dom_4411d9bd._.js",
   "static/chunks/node_modules_tailwind-merge_dist_bundle-mjs_mjs_0ab97e45._.js",
-  "static/chunks/node_modules_58c3e229._.js"
+  "static/chunks/node_modules_fd28054c._.js"
 ],
     source: "entry"
 });

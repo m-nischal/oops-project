@@ -7,7 +7,7 @@ __turbopack_load_page_chunks__("/retailer/products", [
   "static/chunks/node_modules_next_87234b82._.js",
   "static/chunks/node_modules_react-dom_4411d9bd._.js",
   "static/chunks/node_modules_tailwind-merge_dist_bundle-mjs_mjs_0ab97e45._.js",
-  "static/chunks/node_modules_88c24d3a._.js",
+  "static/chunks/node_modules_eb0f114b._.js",
   "static/chunks/src_pages_retailer_products_2da965e7.js",
-  "static/chunks/turbopack-src_pages_retailer_products_26fcd3ba.js"
+  "static/chunks/turbopack-src_pages_retailer_products_d3d6876b.js"
 ])

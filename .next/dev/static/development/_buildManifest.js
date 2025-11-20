@@ -5,26 +5,17 @@ self.__BUILD_MANIFEST = {
   "/_error": [
     "static/chunks/pages/_error.js"
   ],
-  "/login": [
-    "static/chunks/pages/login.js"
-  ],
-  "/profile": [
-    "static/chunks/pages/profile.js"
-  ],
   "/retailer/dashboard": [
     "static/chunks/pages/retailer/dashboard.js"
   ],
-  "/wholesaler/dashboard": [
-    "static/chunks/pages/wholesaler/dashboard.js"
+  "/retailer/inventory": [
+    "static/chunks/pages/retailer/inventory.js"
   ],
-  "/wholesaler/products": [
-    "static/chunks/pages/wholesaler/products.js"
+  "/retailer/products": [
+    "static/chunks/pages/retailer/products.js"
   ],
-  "/wholesaler/products/[id]/edit": [
-    "static/chunks/pages/wholesaler/products/[id]/edit.js"
-  ],
-  "/wholesaler/products/new": [
-    "static/chunks/pages/wholesaler/products/new.js"
+  "/retailer/products/[id]/edit": [
+    "static/chunks/pages/retailer/products/[id]/edit.js"
   ],
   "__rewrites": {
     "afterFiles": [],

@@ -150,6 +150,46 @@ const WarehouseSchema = new Schema({
 }, {
     _id: false
 });
+// --- NEW SCHEMA: ManufacturedAtSchema ---
+// Uses the same structure as a warehouse location, but without leadTimeDays
+const ManufacturedAtSchema = new Schema({
+    name: {
+        type: String
+    },
+    address: {
+        type: String
+    },
+    city: {
+        type: String
+    },
+    state: {
+        type: String
+    },
+    country: {
+        type: String
+    },
+    pincode: {
+        type: String
+    },
+    location: {
+        type: {
+            type: String,
+            enum: [
+                'Point'
+            ],
+            default: 'Point'
+        },
+        coordinates: {
+            type: [
+                Number
+            ],
+            default: undefined
+        }
+    }
+}, {
+    _id: false
+});
+// ----------------------------------------
 const ProductDetailsSchema = new Schema({
     materialComposition: {
         type: String
@@ -181,7 +221,6 @@ const ProductDetailsSchema = new Schema({
 /* --- Main Product Schema --- */ const ProductSchema = new Schema({
     // --- NEW FIELD ---
     // Tracks who owns this product document (Retailer or Wholesaler).
-    // This will point to your 'User' model.
     ownerId: {
         type: Schema.Types.ObjectId,
         ref: 'User',
@@ -197,6 +236,12 @@ const ProductDetailsSchema = new Schema({
         default: null,
         index: true
     },
+    // --- NEW FIELD: Manufactured At Location ---
+    manufacturedAt: {
+        type: ManufacturedAtSchema,
+        default: null
+    },
+    // -------------------------------------------
     /* --- Existing Fields --- */ name: {
         type: String,
         required: true,
@@ -271,7 +316,7 @@ const ProductDetailsSchema = new Schema({
 /**
  * get best delivery estimate
  */ ProductSchema.methods.estimateDeliveryTo = function(customerLocation = {}) {
-    // ... (your existing method logic) ...
+    // ... (existing logic) ...
     const whs = this.warehouses || [];
     if (!whs.length) return {
         estimatedDays: null,
@@ -312,7 +357,7 @@ const ProductDetailsSchema = new Schema({
 /**
  * STATIC HELPER: computeTotalStockForPlainObject
  */ ProductSchema.statics.computeTotalStockForPlainObject = function(productPlain = {}) {
-    // ... (your existing static logic) ...
+    // ... (existing logic) ...
     if (!productPlain) return 0;
     if (typeof productPlain.totalStock === "number" && Array.isArray(productPlain.sizes) === false) {
         return productPlain.totalStock;
@@ -329,7 +374,7 @@ const ProductDetailsSchema = new Schema({
 /**
  * OPTIONAL STATIC HELPER: recalculateAndPersist
  */ ProductSchema.statics.recalculateAndPersist = async function(productId) {
-    // ... (your existing static logic) ...
+    // ... (existing logic) ...
     if (!productId) throw new Error("productId required");
     const Product = this;
     const doc = await Product.findById(productId);

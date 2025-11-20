@@ -1,6 +1,6 @@
 var R=require("../../chunks/ssr/[turbopack]_runtime.js")("server/pages/retailer/inventory.js")
 R.c("server/chunks/ssr/[root-of-the-server]__31b19c0d._.js")
-R.c("server/chunks/ssr/node_modules_cb74f1ff._.js")
+R.c("server/chunks/ssr/node_modules_fd7572f9._.js")
 R.c("server/chunks/ssr/node_modules_24199772._.js")
 R.c("server/chunks/ssr/[root-of-the-server]__e6a4d965._.js")
 R.c("server/chunks/ssr/[root-of-the-server]__e24bbf3d._.js")
