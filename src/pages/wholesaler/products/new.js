@@ -1,11 +1,23 @@
 // src/pages/wholesaler/products/new.js
-import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import React, {
+  useState,
+  useEffect,
+  useCallback,
+  useMemo,
+  useRef,
+} from "react";
 import { useRouter } from "next/router";
 import { useAuthGuard } from "../../../hooks/useAuthGuard";
 import WholesalerLayout from "../../../components/WholesalerLayout";
 import TagsInput from "../../../components/TagsInput";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+  CardDescription,
+} from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
@@ -36,206 +48,1567 @@ import {
 
 // Google Maps/Places API imports
 import { GoogleMap, useLoadScript, Marker } from "@react-google-maps/api";
-import usePlacesAutocomplete, { getGeocode, getLatLng } from "use-places-autocomplete";
+import usePlacesAutocomplete, {
+  getGeocode,
+  getLatLng,
+} from "use-places-autocomplete";
 
 const libraries = ["places"];
 
 // --- EXTENDED COUNTRY DATA ---
 const COUNTRY_DATA = [
-  { country: "Afghanistan", code: "+93", flag: "🇦🇫", lat: 33.9391, lng: 67.7099, iso2: "AF" },
-  { country: "Albania", code: "+355", flag: "🇦🇱", lat: 41.1533, lng: 20.1683, iso2: "AL" },
-  { country: "Algeria", code: "+213", flag: "🇩🇿", lat: 28.0339, lng: 1.6596, iso2: "DZ" },
-  { country: "Andorra", code: "+376", flag: "🇦🇩", lat: 42.5462, lng: 1.6015, iso2: "AD" },
-  { country: "Angola", code: "+244", flag: "🇦🇴", lat: -11.2027, lng: 17.8739, iso2: "AO" },
-  { country: "Antigua and Barbuda", code: "+1268", flag: "🇦🇬", lat: 17.0608, lng: -61.7964, iso2: "AG" },
-  { country: "Argentina", code: "+54", flag: "🇦🇷", lat: -38.4161, lng: -63.6167, iso2: "AR" },
-  { country: "Armenia", code: "+374", flag: "🇦🇲", lat: 40.0691, lng: 45.0382, iso2: "AM" },
-  { country: "Australia", code: "+61", flag: "🇦🇺", lat: -25.2744, lng: 133.7751, iso2: "AU" },
-  { country: "Austria", code: "+43", flag: "🇦🇹", lat: 47.5162, lng: 14.5501, iso2: "AT" },
-  { country: "Azerbaijan", code: "+994", flag: "🇦🇿", lat: 40.1431, lng: 47.5769, iso2: "AZ" },
-  { country: "Bahamas", code: "+1242", flag: "🇧🇸", lat: 25.0343, lng: -77.3963, iso2: "BS" },
-  { country: "Bahrain", code: "+973", flag: "🇧🇭", lat: 25.9304, lng: 50.6378, iso2: "BH" },
-  { country: "Bangladesh", code: "+880", flag: "🇧🇩", lat: 23.685, lng: 90.3563, iso2: "BD" },
-  { country: "Barbados", code: "+1246", flag: "🇧🇧", lat: 13.1939, lng: -59.5432, iso2: "BB" },
-  { country: "Belarus", code: "+375", flag: "🇧🇾", lat: 53.7098, lng: 27.9534, iso2: "BY" },
-  { country: "Belgium", code: "+32", flag: "🇧🇪", lat: 50.5039, lng: 4.4699, iso2: "BE" },
-  { country: "Belize", code: "+501", flag: "🇧🇿", lat: 17.1899, lng: -88.4977, iso2: "BZ" },
-  { country: "Benin", code: "+229", flag: "🇧🇯", lat: 9.3077, lng: 2.3158, iso2: "BJ" },
-  { country: "Bhutan", code: "+975", flag: "🇧🇹", lat: 27.5142, lng: 90.4336, iso2: "BT" },
-  { country: "Bolivia", code: "+591", flag: "🇧🇴", lat: -16.2902, lng: -63.5887, iso2: "BO" },
-  { country: "Bosnia and Herzegovina", code: "+387", flag: "🇧🇦", lat: 43.9159, lng: 17.6791, iso2: "BA" },
-  { country: "Botswana", code: "+267", flag: "🇧🇼", lat: -22.3285, lng: 24.6849, iso2: "BW" },
-  { country: "Brazil", code: "+55", flag: "🇧🇷", lat: -14.235, lng: -51.9253, iso2: "BR" },
-  { country: "Brunei", code: "+673", flag: "🇧🇳", lat: 4.5353, lng: 114.7277, iso2: "BN" },
-  { country: "Bulgaria", code: "+359", flag: "🇧🇬", lat: 42.7339, lng: 25.4858, iso2: "BG" },
-  { country: "Burkina Faso", code: "+226", flag: "🇧🇫", lat: 12.2383, lng: -1.5616, iso2: "BF" },
-  { country: "Burundi", code: "+257", flag: "🇧🇮", lat: -3.3731, lng: 29.9189, iso2: "BI" },
-  { country: "Cabo Verde", code: "+238", flag: "🇨🇻", lat: 16.0021, lng: -24.0132, iso2: "CV" },
-  { country: "Cambodia", code: "+855", flag: "🇰🇭", lat: 12.5657, lng: 104.991, iso2: "KH" },
-  { country: "Cameroon", code: "+237", flag: "🇨🇲", lat: 7.3697, lng: 12.3547, iso2: "CM" },
-  { country: "Canada", code: "+1", flag: "🇨🇦", lat: 56.1304, lng: -106.3468, iso2: "CA" },
-  { country: "Central African Republic", code: "+236", flag: "🇨🇫", lat: 6.6111, lng: 20.9394, iso2: "CF" },
-  { country: "Chad", code: "+235", flag: "🇹🇩", lat: 15.4542, lng: 18.7322, iso2: "TD" },
-  { country: "Chile", code: "+56", flag: "🇨🇱", lat: -35.6751, lng: -71.543, iso2: "CL" },
-  { country: "China", code: "+86", flag: "🇨🇳", lat: 35.8617, lng: 104.1954, iso2: "CN" },
-  { country: "Colombia", code: "+57", flag: "🇨🇴", lat: 4.5709, lng: -74.2973, iso2: "CO" },
-  { country: "Comoros", code: "+269", flag: "🇰🇲", lat: -11.875, lng: 43.8722, iso2: "KM" },
-  { country: "Congo (Brazzaville)", code: "+242", flag: "🇨🇬", lat: -0.228, lng: 15.8277, iso2: "CG" },
-  { country: "Congo (Kinshasa)", code: "+243", flag: "🇨🇩", lat: -4.0383, lng: 21.7587, iso2: "CD" },
-  { country: "Costa Rica", code: "+506", flag: "🇨🇷", lat: 9.7489, lng: -83.7534, iso2: "CR" },
-  { country: "Croatia", code: "+385", flag: "🇭🇷", lat: 45.1, lng: 15.2, iso2: "HR" },
-  { country: "Cuba", code: "+53", flag: "🇨🇺", lat: 21.5218, lng: -77.7812, iso2: "CU" },
-  { country: "Cyprus", code: "+357", flag: "🇨🇾", lat: 35.1264, lng: 33.4299, iso2: "CY" },
-  { country: "Czechia", code: "+420", flag: "🇨🇿", lat: 49.8175, lng: 15.4729, iso2: "CZ" },
-  { country: "Denmark", code: "+45", flag: "🇩🇰", lat: 56.2639, lng: 9.5018, iso2: "DK" },
-  { country: "Djibouti", code: "+253", flag: "🇩🇯", lat: 11.8251, lng: 42.5903, iso2: "DJ" },
-  { country: "Dominica", code: "+1767", flag: "🇩🇲", lat: 15.415, lng: -61.371, iso2: "DM" },
-  { country: "Dominican Republic", code: "+1809", flag: "🇩🇴", lat: 18.7357, lng: -70.1626, iso2: "DO" },
-  { country: "East Timor", code: "+670", flag: "🇹🇱", lat: -8.8742, lng: 125.7275, iso2: "TL" },
-  { country: "Ecuador", code: "+593", flag: "🇪🇨", lat: -1.8312, lng: -78.1834, iso2: "EC" },
-  { country: "Egypt", code: "+20", flag: "🇪🇬", lat: 26.8206, lng: 30.8025, iso2: "EG" },
-  { country: "El Salvador", code: "+503", flag: "🇸🇻", lat: 13.7942, lng: -88.8965, iso2: "SV" },
-  { country: "Equatorial Guinea", code: "+240", flag: "🇬🇶", lat: 1.6508, lng: 10.2679, iso2: "GQ" },
-  { country: "Eritrea", code: "+291", flag: "🇪🇷", lat: 15.1794, lng: 39.7823, iso2: "ER" },
-  { country: "Estonia", code: "+372", flag: "🇪🇪", lat: 58.5953, lng: 25.0136, iso2: "EE" },
-  { country: "Eswatini", code: "+268", flag: "🇸🇿", lat: -26.5225, lng: 31.4659, iso2: "SZ" },
-  { country: "Ethiopia", code: "+251", flag: "🇪🇹", lat: 9.145, lng: 40.4897, iso2: "ET" },
-  { country: "Fiji", code: "+679", flag: "🇫🇯", lat: -16.5782, lng: 179.4145, iso2: "FJ" },
-  { country: "Finland", code: "+358", flag: "🇫🇮", lat: 61.9241, lng: 25.7482, iso2: "FI" },
-  { country: "France", code: "+33", flag: "🇫🇷", lat: 46.2276, lng: 2.2137, iso2: "FR" },
-  { country: "Gabon", code: "+241", flag: "🇬🇦", lat: -0.8037, lng: 11.6094, iso2: "GA" },
-  { country: "Gambia", code: "+220", flag: "🇬🇲", lat: 13.4432, lng: -15.3101, iso2: "GM" },
-  { country: "Georgia", code: "+995", flag: "🇬🇪", lat: 42.3154, lng: 43.3569, iso2: "GE" },
-  { country: "Germany", code: "+49", flag: "🇩🇪", lat: 51.1657, lng: 10.4515, iso2: "DE" },
-  { country: "Ghana", code: "+233", flag: "🇬🇭", lat: 7.9465, lng: -1.0232, iso2: "GH" },
-  { country: "Greece", code: "+30", flag: "🇬🇷", lat: 39.0742, lng: 21.8243, iso2: "GR" },
-  { country: "Grenada", code: "+1473", flag: "🇬🇩", lat: 12.2628, lng: -61.6042, iso2: "GD" },
-  { country: "Guatemala", code: "+502", flag: "🇬🇹", lat: 15.7835, lng: -90.2308, iso2: "GT" },
-  { country: "Guinea", code: "+224", flag: "🇬🇳", lat: 9.9456, lng: -9.6966, iso2: "GN" },
-  { country: "Guinea-Bissau", code: "+245", flag: "🇬🇼", lat: 11.8037, lng: -15.1804, iso2: "GW" },
-  { country: "Guyana", code: "+592", flag: "🇬🇾", lat: 4.8604, lng: -58.9302, iso2: "GY" },
-  { country: "Haiti", code: "+509", flag: "🇭🇹", lat: 18.9712, lng: -72.2852, iso2: "HT" },
-  { country: "Honduras", code: "+504", flag: "🇭🇳", lat: 15.1999, lng: -86.2419, iso2: "HN" },
-  { country: "Hungary", code: "+36", flag: "🇭🇺", lat: 47.1625, lng: 19.5033, iso2: "HU" },
-  { country: "Iceland", code: "+354", flag: "🇮🇸", lat: 64.9631, lng: -19.0208, iso2: "IS" },
-  { country: "India", code: "+91", flag: "🇮🇳", lat: 20.5937, lng: 78.9629, iso2: "IN" },
-  { country: "Indonesia", code: "+62", flag: "🇮🇩", lat: -0.7893, lng: 113.9213, iso2: "ID" },
-  { country: "Iran", code: "+98", flag: "🇮🇷", lat: 32.4279, lng: 53.688, iso2: "IR" },
-  { country: "Iraq", code: "+964", flag: "🇮🇶", lat: 33.2232, lng: 43.6793, iso2: "IQ" },
-  { country: "Ireland", code: "+353", flag: "🇮🇪", lat: 53.4129, lng: -8.2439, iso2: "IE" },
-  { country: "Israel", code: "+972", flag: "🇮🇱", lat: 31.0461, lng: 34.8516, iso2: "IL" },
-  { country: "Italy", code: "+39", flag: "🇮🇹", lat: 41.8719, lng: 12.5674, iso2: "IT" },
-  { country: "Jamaica", code: "+1876", flag: "🇯🇲", lat: 18.1096, lng: -77.2975, iso2: "JM" },
-  { country: "Japan", code: "+81", flag: "🇯🇵", lat: 36.2048, lng: 138.2529, iso2: "JP" },
-  { country: "Jordan", code: "+962", flag: "🇯🇴", lat: 30.5852, lng: 36.2384, iso2: "JO" },
-  { country: "Kazakhstan", code: "+7", flag: "🇰🇿", lat: 48.0196, lng: 66.9237, iso2: "KZ" },
-  { country: "Kenya", code: "+254", flag: "🇰🇪", lat: -0.0236, lng: 37.9062, iso2: "KE" },
-  { country: "Kiribati", code: "+686", flag: "🇰🇮", lat: -3.3704, lng: -168.734, iso2: "KI" },
-  { country: "Kuwait", code: "+965", flag: "🇰🇼", lat: 29.3117, lng: 47.4818, iso2: "KW" },
-  { country: "Kyrgyzstan", code: "+996", flag: "🇰🇬", lat: 41.2044, lng: 74.7661, iso2: "KG" },
-  { country: "Laos", code: "+856", flag: "🇱🇦", lat: 19.8563, lng: 102.4955, iso2: "LA" },
-  { country: "Latvia", code: "+371", flag: "🇱🇻", lat: 56.8796, lng: 24.6032, iso2: "LV" },
-  { country: "Lebanon", code: "+961", flag: "🇱🇧", lat: 33.8547, lng: 35.8623, iso2: "LB" },
-  { country: "Lesotho", code: "+266", flag: "🇱🇸", lat: -29.6099, lng: 28.2336, iso2: "LS" },
-  { country: "Liberia", code: "+231", flag: "🇱🇷", lat: 6.4281, lng: -9.4295, iso2: "LR" },
-  { country: "Libya", code: "+218", flag: "🇱🇾", lat: 26.3351, lng: 17.2283, iso2: "LY" },
-  { country: "Liechtenstein", code: "+423", flag: "🇱🇮", lat: 47.166, lng: 9.5554, iso2: "LI" },
-  { country: "Lithuania", code: "+370", flag: "🇱🇹", lat: 55.1694, lng: 23.8813, iso2: "LT" },
-  { country: "Luxembourg", code: "+352", flag: "🇱🇺", lat: 49.8153, lng: 6.1296, iso2: "LU" },
-  { country: "Madagascar", code: "+261", flag: "🇲🇬", lat: -18.7669, lng: 46.8691, iso2: "MG" },
-  { country: "Malawi", code: "+265", flag: "🇲🇼", lat: -13.2543, lng: 34.3015, iso2: "MW" },
-  { country: "Malaysia", code: "+60", flag: "🇲🇾", lat: 4.2105, lng: 101.9758, iso2: "MY" },
-  { country: "Maldives", code: "+960", flag: "🇲🇻", lat: 3.2028, lng: 73.2207, iso2: "MV" },
-  { country: "Mali", code: "+223", flag: "🇲🇱", lat: 17.5707, lng: -3.9962, iso2: "ML" },
-  { country: "Malta", code: "+356", flag: "🇲🇹", lat: 35.9375, lng: 14.3754, iso2: "MT" },
-  { country: "Marshall Islands", code: "+692", flag: "🇲🇭", lat: 7.1315, lng: 171.1857, iso2: "MH" },
-  { country: "Mauritania", code: "+222", flag: "🇲🇷", lat: 21.0079, lng: -10.9408, iso2: "MR" },
-  { country: "Mauritius", code: "+230", flag: "🇲🇺", lat: -20.3484, lng: 57.5522, iso2: "MU" },
-  { country: "Mexico", code: "+52", flag: "🇲🇽", lat: 23.6345, lng: -102.5528, iso2: "MX" },
-  { country: "Micronesia", code: "+691", flag: "🇫🇲", lat: 7.4256, lng: 150.5508, iso2: "FM" },
-  { country: "Moldova", code: "+373", flag: "🇲🇩", lat: 47.4116, lng: 28.3699, iso2: "MD" },
-  { country: "Monaco", code: "+377", flag: "🇲🇨", lat: 43.7333, lng: 7.4167, iso2: "MC" },
-  { country: "Mongolia", code: "+976", flag: "🇲🇳", lat: 46.8625, lng: 103.8467, iso2: "MN" },
-  { country: "Montenegro", code: "+382", flag: "🇲🇪", lat: 42.7087, lng: 19.3743, iso2: "ME" },
-  { country: "Morocco", code: "+212", flag: "🇲🇦", lat: 31.7917, lng: -7.0926, iso2: "MA" },
-  { country: "Mozambique", code: "+258", flag: "🇲🇿", lat: -18.6657, lng: 35.5296, iso2: "MZ" },
-  { country: "Myanmar", code: "+95", flag: "🇲🇲", lat: 21.914, lng: 95.9562, iso2: "MM" },
-  { country: "Namibia", code: "+264", flag: "🇳🇦", lat: -22.9576, lng: 18.4904, iso2: "NA" },
-  { country: "Nauru", code: "+674", flag: "🇳🇷", lat: -0.5228, lng: 166.9315, iso2: "NR" },
-  { country: "Nepal", code: "+977", flag: "🇳🇵", lat: 28.3949, lng: 84.124, iso2: "NP" },
-  { country: "Netherlands", code: "+31", flag: "🇳🇱", lat: 52.1326, lng: 5.2913, iso2: "NL" },
-  { country: "New Zealand", code: "+64", flag: "🇳🇿", lat: -40.9006, lng: 174.886, iso2: "NZ" },
-  { country: "Nicaragua", code: "+505", flag: "🇳🇮", lat: 12.8654, lng: -85.2072, iso2: "NI" },
-  { country: "Niger", code: "+227", flag: "🇳🇪", lat: 17.6078, lng: 8.0817, iso2: "NE" },
-  { country: "Nigeria", code: "+234", flag: "🇳🇬", lat: 9.082, lng: 8.6753, iso2: "NG" },
-  { country: "North Korea", code: "+850", flag: "🇰🇵", lat: 40.3399, lng: 127.51, iso2: "KP" },
-  { country: "North Macedonia", code: "+389", flag: "🇲🇰", lat: 41.6086, lng: 21.7453, iso2: "MK" },
-  { country: "Norway", code: "+47", flag: "🇳🇴", lat: 60.472, lng: 8.4689, iso2: "NO" },
-  { country: "Oman", code: "+968", flag: "🇴🇲", lat: 21.4735, lng: 55.9768, iso2: "OM" },
-  { country: "Pakistan", code: "+92", flag: "🇵🇰", lat: 30.3753, lng: 69.3451, iso2: "PK" },
-  { country: "Palau", code: "+680", flag: "🇵🇼", lat: 7.515, lng: 134.5825, iso2: "PW" },
-  { country: "Panama", code: "+507", flag: "🇵🇦", lat: 8.538, lng: -80.7821, iso2: "PA" },
-  { country: "Papua New Guinea", code: "+675", flag: "🇵🇬", lat: -6.315, lng: 143.9555, iso2: "PG" },
-  { country: "Paraguay", code: "+595", flag: "🇵🇾", lat: -23.4425, lng: -58.4438, iso2: "PY" },
-  { country: "Peru", code: "+51", flag: "🇵🇪", lat: -9.19, lng: -75.0152, iso2: "PE" },
-  { country: "Philippines", code: "+63", flag: "🇵🇭", lat: 12.8797, lng: 121.774, iso2: "PH" },
-  { country: "Poland", code: "+48", flag: "🇵🇱", lat: 51.9194, lng: 19.1451, iso2: "PL" },
-  { country: "Portugal", code: "+351", flag: "🇵🇹", lat: 39.3999, lng: -8.2245, iso2: "PT" },
-  { country: "Qatar", code: "+974", flag: "🇶🇦", lat: 25.3548, lng: 51.1839, iso2: "QA" },
-  { country: "Romania", code: "+40", flag: "🇷🇴", lat: 45.9432, lng: 24.9668, iso2: "RO" },
-  { country: "Russia", code: "+7", flag: "🇷🇺", lat: 61.524, lng: 105.3188, iso2: "RU" },
-  { country: "Rwanda", code: "+250", flag: "🇷🇼", lat: -1.9403, lng: 29.8739, iso2: "RW" },
-  { country: "Saint Kitts and Nevis", code: "+1869", flag: "🇰🇳", lat: 17.3578, lng: -62.783, iso2: "KN" },
-  { country: "Saint Lucia", code: "+1758", flag: "🇱🇨", lat: 13.9094, lng: -60.9789, iso2: "LC" },
-  { country: "Saint Vincent and the Grenadines", code: "+1784", flag: "🇻🇨", lat: 13.2505, lng: -61.2008, iso2: "VC" },
-  { country: "Samoa", code: "+685", flag: "🇼🇸", lat: -13.759, lng: -172.1046, iso2: "WS" },
-  { country: "San Marino", code: "+378", flag: "🇸🇲", lat: 43.9424, lng: 12.4578, iso2: "SM" },
-  { country: "Sao Tome and Principe", code: "+239", flag: "🇸🇹", lat: 0.1864, lng: 6.6131, iso2: "ST" },
-  { country: "Saudi Arabia", code: "+966", flag: "🇸🇦", lat: 23.8859, lng: 45.0792, iso2: "SA" },
-  { country: "Senegal", code: "+221", flag: "🇸🇳", lat: 14.4974, lng: -14.4524, iso2: "SN" },
-  { country: "Serbia", code: "+381", flag: "🇷🇸", lat: 44.0165, lng: 21.0059, iso2: "RS" },
-  { country: "Seychelles", code: "+248", flag: "🇸🇨", lat: -4.6796, lng: 55.492, iso2: "SC" },
-  { country: "Sierra Leone", code: "+232", flag: "🇸🇱", lat: 8.4606, lng: -11.7799, iso2: "SL" },
-  { country: "Singapore", code: "+65", flag: "🇸🇬", lat: 1.3521, lng: 103.8198, iso2: "SG" },
-  { country: "Slovakia", code: "+421", flag: "🇸🇰", lat: 48.669, lng: 19.699, iso2: "SK" },
-  { country: "Slovenia", code: "+386", flag: "🇸🇮", lat: 46.1512, lng: 14.9955, iso2: "SI" },
-  { country: "Solomon Islands", code: "+677", flag: "🇸🇧", lat: -9.6457, lng: 160.1562, iso2: "SB" },
-  { country: "Somalia", code: "+252", flag: "🇸🇴", lat: 5.1521, lng: 46.1996, iso2: "SO" },
-  { country: "South Africa", code: "+27", flag: "🇿🇦", lat: -30.5595, lng: 22.9375, iso2: "ZA" },
-  { country: "South Korea", code: "+82", flag: "🇰🇷", lat: 35.9078, lng: 127.7692, iso2: "KR" },
-  { country: "South Sudan", code: "+211", flag: "🇸🇸", lat: 6.877, lng: 31.307, iso2: "SS" },
-  { country: "Spain", code: "+34", flag: "🇪🇸", lat: 40.4637, lng: -3.7492, iso2: "ES" },
-  { country: "Sri Lanka", code: "+94", flag: "🇱🇰", lat: 7.8731, lng: 80.7718, iso2: "LK" },
-  { country: "Sudan", code: "+249", flag: "🇸🇩", lat: 12.8628, lng: 30.2176, iso2: "SD" },
-  { country: "Suriname", code: "+597", flag: "🇸🇷", lat: 3.9193, lng: -56.0278, iso2: "SR" },
-  { country: "Sweden", code: "+46", flag: "🇸🇪", lat: 60.1282, lng: 18.6435, iso2: "SE" },
-  { country: "Switzerland", code: "+41", flag: "🇨🇭", lat: 46.8182, lng: 8.2275, iso2: "CH" },
-  { country: "Syria", code: "+963", flag: "🇸🇾", lat: 34.8021, lng: 38.9968, iso2: "SY" },
-  { country: "Taiwan", code: "+886", flag: "🇹🇼", lat: 23.6978, lng: 120.9605, iso2: "TW" },
-  { country: "Tajikistan", code: "+992", flag: "🇹🇯", lat: 38.861, lng: 71.2761, iso2: "TJ" },
-  { country: "Tanzania", code: "+255", flag: "🇹🇿", lat: -6.369, lng: 34.8888, iso2: "TZ" },
-  { country: "Thailand", code: "+66", flag: "🇹🇭", lat: 15.87, lng: 100.9925, iso2: "TH" },
-  { country: "Togo", code: "+228", flag: "🇹🇬", lat: 8.6195, lng: 0.8248, iso2: "TG" },
-  { country: "Tonga", code: "+676", flag: "🇹🇴", lat: -20.4298, lng: -174.989, iso2: "TO" },
-  { country: "Trinidad and Tobago", code: "+1868", flag: "🇹🇹", lat: 10.6918, lng: -61.2225, iso2: "TT" },
-  { country: "Tunisia", code: "+216", flag: "🇹🇳", lat: 33.8869, lng: 9.5375, iso2: "TN" },
-  { country: "Turkey", code: "+90", flag: "🇹🇷", lat: 38.9637, lng: 35.2433, iso2: "TR" },
-  { country: "Turkmenistan", code: "+993", flag: "🇹🇲", lat: 38.9697, lng: 59.5563, iso2: "TM" },
-  { country: "Tuvalu", code: "+688", flag: "🇹🇻", lat: -7.1095, lng: 177.6493, iso2: "TV" },
-  { country: "Uganda", code: "+256", flag: "🇺🇬", lat: 1.3733, lng: 32.2903, iso2: "UG" },
-  { country: "Ukraine", code: "+380", flag: "🇺🇦", lat: 48.3794, lng: 31.1656, iso2: "UA" },
-  { country: "United Arab Emirates", code: "+971", flag: "🇦🇪", lat: 23.4241, lng: 53.8478, iso2: "AE" },
-  { country: "United Kingdom", code: "+44", flag: "🇬🇧", lat: 55.3781, lng: -3.436, iso2: "GB" },
-  { country: "United States", code: "+1", flag: "🇺🇸", lat: 39.8283, lng: -98.5795, iso2: "US" },
-  { country: "Uruguay", code: "+598", flag: "🇺🇾", lat: -32.5228, lng: -55.7658, iso2: "UY" },
-  { country: "Uzbekistan", code: "+998", flag: "🇺🇿", lat: 41.3775, lng: 64.5853, iso2: "UZ" },
-  { country: "Vanuatu", code: "+678", flag: "🇻🇺", lat: -15.3768, lng: 166.9592, iso2: "VU" },
-  { country: "Vatican City", code: "+379", flag: "🇻🇦", lat: 41.9029, lng: 12.4534, iso2: "VA" },
-  { country: "Venezuela", code: "+58", flag: "🇻🇪", lat: 6.4238, lng: -66.5897, iso2: "VE" },
-  { country: "Vietnam", code: "+84", flag: "🇻🇳", lat: 14.0583, lng: 108.2772, iso2: "VN" },
-  { country: "Yemen", code: "+967", flag: "🇾🇪", lat: 15.5527, lng: 48.5164, iso2: "YE" },
-  { country: "Zambia", code: "+260", flag: "🇿🇲", lat: -13.1339, lng: 27.8493, iso2: "ZM" },
-  { country: "Zimbabwe", code: "+263", flag: "🇿🇼", lat: -19.0154, lng: 29.1549, iso2: "ZW" },
+  {
+    country: "Afghanistan",
+    code: "+93",
+    flag: "🇦🇫",
+    lat: 33.9391,
+    lng: 67.7099,
+    iso2: "AF",
+  },
+  {
+    country: "Albania",
+    code: "+355",
+    flag: "🇦🇱",
+    lat: 41.1533,
+    lng: 20.1683,
+    iso2: "AL",
+  },
+  {
+    country: "Algeria",
+    code: "+213",
+    flag: "🇩🇿",
+    lat: 28.0339,
+    lng: 1.6596,
+    iso2: "DZ",
+  },
+  {
+    country: "Andorra",
+    code: "+376",
+    flag: "🇦🇩",
+    lat: 42.5462,
+    lng: 1.6015,
+    iso2: "AD",
+  },
+  {
+    country: "Angola",
+    code: "+244",
+    flag: "🇦🇴",
+    lat: -11.2027,
+    lng: 17.8739,
+    iso2: "AO",
+  },
+  {
+    country: "Antigua and Barbuda",
+    code: "+1268",
+    flag: "🇦🇬",
+    lat: 17.0608,
+    lng: -61.7964,
+    iso2: "AG",
+  },
+  {
+    country: "Argentina",
+    code: "+54",
+    flag: "🇦🇷",
+    lat: -38.4161,
+    lng: -63.6167,
+    iso2: "AR",
+  },
+  {
+    country: "Armenia",
+    code: "+374",
+    flag: "🇦🇲",
+    lat: 40.0691,
+    lng: 45.0382,
+    iso2: "AM",
+  },
+  {
+    country: "Australia",
+    code: "+61",
+    flag: "🇦🇺",
+    lat: -25.2744,
+    lng: 133.7751,
+    iso2: "AU",
+  },
+  {
+    country: "Austria",
+    code: "+43",
+    flag: "🇦🇹",
+    lat: 47.5162,
+    lng: 14.5501,
+    iso2: "AT",
+  },
+  {
+    country: "Azerbaijan",
+    code: "+994",
+    flag: "🇦🇿",
+    lat: 40.1431,
+    lng: 47.5769,
+    iso2: "AZ",
+  },
+  {
+    country: "Bahamas",
+    code: "+1242",
+    flag: "🇧🇸",
+    lat: 25.0343,
+    lng: -77.3963,
+    iso2: "BS",
+  },
+  {
+    country: "Bahrain",
+    code: "+973",
+    flag: "🇧🇭",
+    lat: 25.9304,
+    lng: 50.6378,
+    iso2: "BH",
+  },
+  {
+    country: "Bangladesh",
+    code: "+880",
+    flag: "🇧🇩",
+    lat: 23.685,
+    lng: 90.3563,
+    iso2: "BD",
+  },
+  {
+    country: "Barbados",
+    code: "+1246",
+    flag: "🇧🇧",
+    lat: 13.1939,
+    lng: -59.5432,
+    iso2: "BB",
+  },
+  {
+    country: "Belarus",
+    code: "+375",
+    flag: "🇧🇾",
+    lat: 53.7098,
+    lng: 27.9534,
+    iso2: "BY",
+  },
+  {
+    country: "Belgium",
+    code: "+32",
+    flag: "🇧🇪",
+    lat: 50.5039,
+    lng: 4.4699,
+    iso2: "BE",
+  },
+  {
+    country: "Belize",
+    code: "+501",
+    flag: "🇧🇿",
+    lat: 17.1899,
+    lng: -88.4977,
+    iso2: "BZ",
+  },
+  {
+    country: "Benin",
+    code: "+229",
+    flag: "🇧🇯",
+    lat: 9.3077,
+    lng: 2.3158,
+    iso2: "BJ",
+  },
+  {
+    country: "Bhutan",
+    code: "+975",
+    flag: "🇧🇹",
+    lat: 27.5142,
+    lng: 90.4336,
+    iso2: "BT",
+  },
+  {
+    country: "Bolivia",
+    code: "+591",
+    flag: "🇧🇴",
+    lat: -16.2902,
+    lng: -63.5887,
+    iso2: "BO",
+  },
+  {
+    country: "Bosnia and Herzegovina",
+    code: "+387",
+    flag: "🇧🇦",
+    lat: 43.9159,
+    lng: 17.6791,
+    iso2: "BA",
+  },
+  {
+    country: "Botswana",
+    code: "+267",
+    flag: "🇧🇼",
+    lat: -22.3285,
+    lng: 24.6849,
+    iso2: "BW",
+  },
+  {
+    country: "Brazil",
+    code: "+55",
+    flag: "🇧🇷",
+    lat: -14.235,
+    lng: -51.9253,
+    iso2: "BR",
+  },
+  {
+    country: "Brunei",
+    code: "+673",
+    flag: "🇧🇳",
+    lat: 4.5353,
+    lng: 114.7277,
+    iso2: "BN",
+  },
+  {
+    country: "Bulgaria",
+    code: "+359",
+    flag: "🇧🇬",
+    lat: 42.7339,
+    lng: 25.4858,
+    iso2: "BG",
+  },
+  {
+    country: "Burkina Faso",
+    code: "+226",
+    flag: "🇧🇫",
+    lat: 12.2383,
+    lng: -1.5616,
+    iso2: "BF",
+  },
+  {
+    country: "Burundi",
+    code: "+257",
+    flag: "🇧🇮",
+    lat: -3.3731,
+    lng: 29.9189,
+    iso2: "BI",
+  },
+  {
+    country: "Cabo Verde",
+    code: "+238",
+    flag: "🇨🇻",
+    lat: 16.0021,
+    lng: -24.0132,
+    iso2: "CV",
+  },
+  {
+    country: "Cambodia",
+    code: "+855",
+    flag: "🇰🇭",
+    lat: 12.5657,
+    lng: 104.991,
+    iso2: "KH",
+  },
+  {
+    country: "Cameroon",
+    code: "+237",
+    flag: "🇨🇲",
+    lat: 7.3697,
+    lng: 12.3547,
+    iso2: "CM",
+  },
+  {
+    country: "Canada",
+    code: "+1",
+    flag: "🇨🇦",
+    lat: 56.1304,
+    lng: -106.3468,
+    iso2: "CA",
+  },
+  {
+    country: "Central African Republic",
+    code: "+236",
+    flag: "🇨🇫",
+    lat: 6.6111,
+    lng: 20.9394,
+    iso2: "CF",
+  },
+  {
+    country: "Chad",
+    code: "+235",
+    flag: "🇹🇩",
+    lat: 15.4542,
+    lng: 18.7322,
+    iso2: "TD",
+  },
+  {
+    country: "Chile",
+    code: "+56",
+    flag: "🇨🇱",
+    lat: -35.6751,
+    lng: -71.543,
+    iso2: "CL",
+  },
+  {
+    country: "China",
+    code: "+86",
+    flag: "🇨🇳",
+    lat: 35.8617,
+    lng: 104.1954,
+    iso2: "CN",
+  },
+  {
+    country: "Colombia",
+    code: "+57",
+    flag: "🇨🇴",
+    lat: 4.5709,
+    lng: -74.2973,
+    iso2: "CO",
+  },
+  {
+    country: "Comoros",
+    code: "+269",
+    flag: "🇰🇲",
+    lat: -11.875,
+    lng: 43.8722,
+    iso2: "KM",
+  },
+  {
+    country: "Congo (Brazzaville)",
+    code: "+242",
+    flag: "🇨🇬",
+    lat: -0.228,
+    lng: 15.8277,
+    iso2: "CG",
+  },
+  {
+    country: "Congo (Kinshasa)",
+    code: "+243",
+    flag: "🇨🇩",
+    lat: -4.0383,
+    lng: 21.7587,
+    iso2: "CD",
+  },
+  {
+    country: "Costa Rica",
+    code: "+506",
+    flag: "🇨🇷",
+    lat: 9.7489,
+    lng: -83.7534,
+    iso2: "CR",
+  },
+  {
+    country: "Croatia",
+    code: "+385",
+    flag: "🇭🇷",
+    lat: 45.1,
+    lng: 15.2,
+    iso2: "HR",
+  },
+  {
+    country: "Cuba",
+    code: "+53",
+    flag: "🇨🇺",
+    lat: 21.5218,
+    lng: -77.7812,
+    iso2: "CU",
+  },
+  {
+    country: "Cyprus",
+    code: "+357",
+    flag: "🇨🇾",
+    lat: 35.1264,
+    lng: 33.4299,
+    iso2: "CY",
+  },
+  {
+    country: "Czechia",
+    code: "+420",
+    flag: "🇨🇿",
+    lat: 49.8175,
+    lng: 15.4729,
+    iso2: "CZ",
+  },
+  {
+    country: "Denmark",
+    code: "+45",
+    flag: "🇩🇰",
+    lat: 56.2639,
+    lng: 9.5018,
+    iso2: "DK",
+  },
+  {
+    country: "Djibouti",
+    code: "+253",
+    flag: "🇩🇯",
+    lat: 11.8251,
+    lng: 42.5903,
+    iso2: "DJ",
+  },
+  {
+    country: "Dominica",
+    code: "+1767",
+    flag: "🇩🇲",
+    lat: 15.415,
+    lng: -61.371,
+    iso2: "DM",
+  },
+  {
+    country: "Dominican Republic",
+    code: "+1809",
+    flag: "🇩🇴",
+    lat: 18.7357,
+    lng: -70.1626,
+    iso2: "DO",
+  },
+  {
+    country: "East Timor",
+    code: "+670",
+    flag: "🇹🇱",
+    lat: -8.8742,
+    lng: 125.7275,
+    iso2: "TL",
+  },
+  {
+    country: "Ecuador",
+    code: "+593",
+    flag: "🇪🇨",
+    lat: -1.8312,
+    lng: -78.1834,
+    iso2: "EC",
+  },
+  {
+    country: "Egypt",
+    code: "+20",
+    flag: "🇪🇬",
+    lat: 26.8206,
+    lng: 30.8025,
+    iso2: "EG",
+  },
+  {
+    country: "El Salvador",
+    code: "+503",
+    flag: "🇸🇻",
+    lat: 13.7942,
+    lng: -88.8965,
+    iso2: "SV",
+  },
+  {
+    country: "Equatorial Guinea",
+    code: "+240",
+    flag: "🇬🇶",
+    lat: 1.6508,
+    lng: 10.2679,
+    iso2: "GQ",
+  },
+  {
+    country: "Eritrea",
+    code: "+291",
+    flag: "🇪🇷",
+    lat: 15.1794,
+    lng: 39.7823,
+    iso2: "ER",
+  },
+  {
+    country: "Estonia",
+    code: "+372",
+    flag: "🇪🇪",
+    lat: 58.5953,
+    lng: 25.0136,
+    iso2: "EE",
+  },
+  {
+    country: "Eswatini",
+    code: "+268",
+    flag: "🇸🇿",
+    lat: -26.5225,
+    lng: 31.4659,
+    iso2: "SZ",
+  },
+  {
+    country: "Ethiopia",
+    code: "+251",
+    flag: "🇪🇹",
+    lat: 9.145,
+    lng: 40.4897,
+    iso2: "ET",
+  },
+  {
+    country: "Fiji",
+    code: "+679",
+    flag: "🇫🇯",
+    lat: -16.5782,
+    lng: 179.4145,
+    iso2: "FJ",
+  },
+  {
+    country: "Finland",
+    code: "+358",
+    flag: "🇫🇮",
+    lat: 61.9241,
+    lng: 25.7482,
+    iso2: "FI",
+  },
+  {
+    country: "France",
+    code: "+33",
+    flag: "🇫🇷",
+    lat: 46.2276,
+    lng: 2.2137,
+    iso2: "FR",
+  },
+  {
+    country: "Gabon",
+    code: "+241",
+    flag: "🇬🇦",
+    lat: -0.8037,
+    lng: 11.6094,
+    iso2: "GA",
+  },
+  {
+    country: "Gambia",
+    code: "+220",
+    flag: "🇬🇲",
+    lat: 13.4432,
+    lng: -15.3101,
+    iso2: "GM",
+  },
+  {
+    country: "Georgia",
+    code: "+995",
+    flag: "🇬🇪",
+    lat: 42.3154,
+    lng: 43.3569,
+    iso2: "GE",
+  },
+  {
+    country: "Germany",
+    code: "+49",
+    flag: "🇩🇪",
+    lat: 51.1657,
+    lng: 10.4515,
+    iso2: "DE",
+  },
+  {
+    country: "Ghana",
+    code: "+233",
+    flag: "🇬🇭",
+    lat: 7.9465,
+    lng: -1.0232,
+    iso2: "GH",
+  },
+  {
+    country: "Greece",
+    code: "+30",
+    flag: "🇬🇷",
+    lat: 39.0742,
+    lng: 21.8243,
+    iso2: "GR",
+  },
+  {
+    country: "Grenada",
+    code: "+1473",
+    flag: "🇬🇩",
+    lat: 12.2628,
+    lng: -61.6042,
+    iso2: "GD",
+  },
+  {
+    country: "Guatemala",
+    code: "+502",
+    flag: "🇬🇹",
+    lat: 15.7835,
+    lng: -90.2308,
+    iso2: "GT",
+  },
+  {
+    country: "Guinea",
+    code: "+224",
+    flag: "🇬🇳",
+    lat: 9.9456,
+    lng: -9.6966,
+    iso2: "GN",
+  },
+  {
+    country: "Guinea-Bissau",
+    code: "+245",
+    flag: "🇬🇼",
+    lat: 11.8037,
+    lng: -15.1804,
+    iso2: "GW",
+  },
+  {
+    country: "Guyana",
+    code: "+592",
+    flag: "🇬🇾",
+    lat: 4.8604,
+    lng: -58.9302,
+    iso2: "GY",
+  },
+  {
+    country: "Haiti",
+    code: "+509",
+    flag: "🇭🇹",
+    lat: 18.9712,
+    lng: -72.2852,
+    iso2: "HT",
+  },
+  {
+    country: "Honduras",
+    code: "+504",
+    flag: "🇭🇳",
+    lat: 15.1999,
+    lng: -86.2419,
+    iso2: "HN",
+  },
+  {
+    country: "Hungary",
+    code: "+36",
+    flag: "🇭🇺",
+    lat: 47.1625,
+    lng: 19.5033,
+    iso2: "HU",
+  },
+  {
+    country: "Iceland",
+    code: "+354",
+    flag: "🇮🇸",
+    lat: 64.9631,
+    lng: -19.0208,
+    iso2: "IS",
+  },
+  {
+    country: "India",
+    code: "+91",
+    flag: "🇮🇳",
+    lat: 20.5937,
+    lng: 78.9629,
+    iso2: "IN",
+  },
+  {
+    country: "Indonesia",
+    code: "+62",
+    flag: "🇮🇩",
+    lat: -0.7893,
+    lng: 113.9213,
+    iso2: "ID",
+  },
+  {
+    country: "Iran",
+    code: "+98",
+    flag: "🇮🇷",
+    lat: 32.4279,
+    lng: 53.688,
+    iso2: "IR",
+  },
+  {
+    country: "Iraq",
+    code: "+964",
+    flag: "🇮🇶",
+    lat: 33.2232,
+    lng: 43.6793,
+    iso2: "IQ",
+  },
+  {
+    country: "Ireland",
+    code: "+353",
+    flag: "🇮🇪",
+    lat: 53.4129,
+    lng: -8.2439,
+    iso2: "IE",
+  },
+  {
+    country: "Israel",
+    code: "+972",
+    flag: "🇮🇱",
+    lat: 31.0461,
+    lng: 34.8516,
+    iso2: "IL",
+  },
+  {
+    country: "Italy",
+    code: "+39",
+    flag: "🇮🇹",
+    lat: 41.8719,
+    lng: 12.5674,
+    iso2: "IT",
+  },
+  {
+    country: "Jamaica",
+    code: "+1876",
+    flag: "🇯🇲",
+    lat: 18.1096,
+    lng: -77.2975,
+    iso2: "JM",
+  },
+  {
+    country: "Japan",
+    code: "+81",
+    flag: "🇯🇵",
+    lat: 36.2048,
+    lng: 138.2529,
+    iso2: "JP",
+  },
+  {
+    country: "Jordan",
+    code: "+962",
+    flag: "🇯🇴",
+    lat: 30.5852,
+    lng: 36.2384,
+    iso2: "JO",
+  },
+  {
+    country: "Kazakhstan",
+    code: "+7",
+    flag: "🇰🇿",
+    lat: 48.0196,
+    lng: 66.9237,
+    iso2: "KZ",
+  },
+  {
+    country: "Kenya",
+    code: "+254",
+    flag: "🇰🇪",
+    lat: -0.0236,
+    lng: 37.9062,
+    iso2: "KE",
+  },
+  {
+    country: "Kiribati",
+    code: "+686",
+    flag: "🇰🇮",
+    lat: -3.3704,
+    lng: -168.734,
+    iso2: "KI",
+  },
+  {
+    country: "Kuwait",
+    code: "+965",
+    flag: "🇰🇼",
+    lat: 29.3117,
+    lng: 47.4818,
+    iso2: "KW",
+  },
+  {
+    country: "Kyrgyzstan",
+    code: "+996",
+    flag: "🇰🇬",
+    lat: 41.2044,
+    lng: 74.7661,
+    iso2: "KG",
+  },
+  {
+    country: "Laos",
+    code: "+856",
+    flag: "🇱🇦",
+    lat: 19.8563,
+    lng: 102.4955,
+    iso2: "LA",
+  },
+  {
+    country: "Latvia",
+    code: "+371",
+    flag: "🇱🇻",
+    lat: 56.8796,
+    lng: 24.6032,
+    iso2: "LV",
+  },
+  {
+    country: "Lebanon",
+    code: "+961",
+    flag: "🇱🇧",
+    lat: 33.8547,
+    lng: 35.8623,
+    iso2: "LB",
+  },
+  {
+    country: "Lesotho",
+    code: "+266",
+    flag: "🇱🇸",
+    lat: -29.6099,
+    lng: 28.2336,
+    iso2: "LS",
+  },
+  {
+    country: "Liberia",
+    code: "+231",
+    flag: "🇱🇷",
+    lat: 6.4281,
+    lng: -9.4295,
+    iso2: "LR",
+  },
+  {
+    country: "Libya",
+    code: "+218",
+    flag: "🇱🇾",
+    lat: 26.3351,
+    lng: 17.2283,
+    iso2: "LY",
+  },
+  {
+    country: "Liechtenstein",
+    code: "+423",
+    flag: "🇱🇮",
+    lat: 47.166,
+    lng: 9.5554,
+    iso2: "LI",
+  },
+  {
+    country: "Lithuania",
+    code: "+370",
+    flag: "🇱🇹",
+    lat: 55.1694,
+    lng: 23.8813,
+    iso2: "LT",
+  },
+  {
+    country: "Luxembourg",
+    code: "+352",
+    flag: "🇱🇺",
+    lat: 49.8153,
+    lng: 6.1296,
+    iso2: "LU",
+  },
+  {
+    country: "Madagascar",
+    code: "+261",
+    flag: "🇲🇬",
+    lat: -18.7669,
+    lng: 46.8691,
+    iso2: "MG",
+  },
+  {
+    country: "Malawi",
+    code: "+265",
+    flag: "🇲🇼",
+    lat: -13.2543,
+    lng: 34.3015,
+    iso2: "MW",
+  },
+  {
+    country: "Malaysia",
+    code: "+60",
+    flag: "🇲🇾",
+    lat: 4.2105,
+    lng: 101.9758,
+    iso2: "MY",
+  },
+  {
+    country: "Maldives",
+    code: "+960",
+    flag: "🇲🇻",
+    lat: 3.2028,
+    lng: 73.2207,
+    iso2: "MV",
+  },
+  {
+    country: "Mali",
+    code: "+223",
+    flag: "🇲🇱",
+    lat: 17.5707,
+    lng: -3.9962,
+    iso2: "ML",
+  },
+  {
+    country: "Malta",
+    code: "+356",
+    flag: "🇲🇹",
+    lat: 35.9375,
+    lng: 14.3754,
+    iso2: "MT",
+  },
+  {
+    country: "Marshall Islands",
+    code: "+692",
+    flag: "🇲🇭",
+    lat: 7.1315,
+    lng: 171.1857,
+    iso2: "MH",
+  },
+  {
+    country: "Mauritania",
+    code: "+222",
+    flag: "🇲🇷",
+    lat: 21.0079,
+    lng: -10.9408,
+    iso2: "MR",
+  },
+  {
+    country: "Mauritius",
+    code: "+230",
+    flag: "🇲🇺",
+    lat: -20.3484,
+    lng: 57.5522,
+    iso2: "MU",
+  },
+  {
+    country: "Mexico",
+    code: "+52",
+    flag: "🇲🇽",
+    lat: 23.6345,
+    lng: -102.5528,
+    iso2: "MX",
+  },
+  {
+    country: "Micronesia",
+    code: "+691",
+    flag: "🇫🇲",
+    lat: 7.4256,
+    lng: 150.5508,
+    iso2: "FM",
+  },
+  {
+    country: "Moldova",
+    code: "+373",
+    flag: "🇲🇩",
+    lat: 47.4116,
+    lng: 28.3699,
+    iso2: "MD",
+  },
+  {
+    country: "Monaco",
+    code: "+377",
+    flag: "🇲🇨",
+    lat: 43.7333,
+    lng: 7.4167,
+    iso2: "MC",
+  },
+  {
+    country: "Mongolia",
+    code: "+976",
+    flag: "🇲🇳",
+    lat: 46.8625,
+    lng: 103.8467,
+    iso2: "MN",
+  },
+  {
+    country: "Montenegro",
+    code: "+382",
+    flag: "🇲🇪",
+    lat: 42.7087,
+    lng: 19.3743,
+    iso2: "ME",
+  },
+  {
+    country: "Morocco",
+    code: "+212",
+    flag: "🇲🇦",
+    lat: 31.7917,
+    lng: -7.0926,
+    iso2: "MA",
+  },
+  {
+    country: "Mozambique",
+    code: "+258",
+    flag: "🇲🇿",
+    lat: -18.6657,
+    lng: 35.5296,
+    iso2: "MZ",
+  },
+  {
+    country: "Myanmar",
+    code: "+95",
+    flag: "🇲🇲",
+    lat: 21.914,
+    lng: 95.9562,
+    iso2: "MM",
+  },
+  {
+    country: "Namibia",
+    code: "+264",
+    flag: "🇳🇦",
+    lat: -22.9576,
+    lng: 18.4904,
+    iso2: "NA",
+  },
+  {
+    country: "Nauru",
+    code: "+674",
+    flag: "🇳🇷",
+    lat: -0.5228,
+    lng: 166.9315,
+    iso2: "NR",
+  },
+  {
+    country: "Nepal",
+    code: "+977",
+    flag: "🇳🇵",
+    lat: 28.3949,
+    lng: 84.124,
+    iso2: "NP",
+  },
+  {
+    country: "Netherlands",
+    code: "+31",
+    flag: "🇳🇱",
+    lat: 52.1326,
+    lng: 5.2913,
+    iso2: "NL",
+  },
+  {
+    country: "New Zealand",
+    code: "+64",
+    flag: "🇳🇿",
+    lat: -40.9006,
+    lng: 174.886,
+    iso2: "NZ",
+  },
+  {
+    country: "Nicaragua",
+    code: "+505",
+    flag: "🇳🇮",
+    lat: 12.8654,
+    lng: -85.2072,
+    iso2: "NI",
+  },
+  {
+    country: "Niger",
+    code: "+227",
+    flag: "🇳🇪",
+    lat: 17.6078,
+    lng: 8.0817,
+    iso2: "NE",
+  },
+  {
+    country: "Nigeria",
+    code: "+234",
+    flag: "🇳🇬",
+    lat: 9.082,
+    lng: 8.6753,
+    iso2: "NG",
+  },
+  {
+    country: "North Korea",
+    code: "+850",
+    flag: "🇰🇵",
+    lat: 40.3399,
+    lng: 127.51,
+    iso2: "KP",
+  },
+  {
+    country: "North Macedonia",
+    code: "+389",
+    flag: "🇲🇰",
+    lat: 41.6086,
+    lng: 21.7453,
+    iso2: "MK",
+  },
+  {
+    country: "Norway",
+    code: "+47",
+    flag: "🇳🇴",
+    lat: 60.472,
+    lng: 8.4689,
+    iso2: "NO",
+  },
+  {
+    country: "Oman",
+    code: "+968",
+    flag: "🇴🇲",
+    lat: 21.4735,
+    lng: 55.9768,
+    iso2: "OM",
+  },
+  {
+    country: "Pakistan",
+    code: "+92",
+    flag: "🇵🇰",
+    lat: 30.3753,
+    lng: 69.3451,
+    iso2: "PK",
+  },
+  {
+    country: "Palau",
+    code: "+680",
+    flag: "🇵🇼",
+    lat: 7.515,
+    lng: 134.5825,
+    iso2: "PW",
+  },
+  {
+    country: "Panama",
+    code: "+507",
+    flag: "🇵🇦",
+    lat: 8.538,
+    lng: -80.7821,
+    iso2: "PA",
+  },
+  {
+    country: "Papua New Guinea",
+    code: "+675",
+    flag: "🇵🇬",
+    lat: -6.315,
+    lng: 143.9555,
+    iso2: "PG",
+  },
+  {
+    country: "Paraguay",
+    code: "+595",
+    flag: "🇵🇾",
+    lat: -23.4425,
+    lng: -58.4438,
+    iso2: "PY",
+  },
+  {
+    country: "Peru",
+    code: "+51",
+    flag: "🇵🇪",
+    lat: -9.19,
+    lng: -75.0152,
+    iso2: "PE",
+  },
+  {
+    country: "Philippines",
+    code: "+63",
+    flag: "🇵🇭",
+    lat: 12.8797,
+    lng: 121.774,
+    iso2: "PH",
+  },
+  {
+    country: "Poland",
+    code: "+48",
+    flag: "🇵🇱",
+    lat: 51.9194,
+    lng: 19.1451,
+    iso2: "PL",
+  },
+  {
+    country: "Portugal",
+    code: "+351",
+    flag: "🇵🇹",
+    lat: 39.3999,
+    lng: -8.2245,
+    iso2: "PT",
+  },
+  {
+    country: "Qatar",
+    code: "+974",
+    flag: "🇶🇦",
+    lat: 25.3548,
+    lng: 51.1839,
+    iso2: "QA",
+  },
+  {
+    country: "Romania",
+    code: "+40",
+    flag: "🇷🇴",
+    lat: 45.9432,
+    lng: 24.9668,
+    iso2: "RO",
+  },
+  {
+    country: "Russia",
+    code: "+7",
+    flag: "🇷🇺",
+    lat: 61.524,
+    lng: 105.3188,
+    iso2: "RU",
+  },
+  {
+    country: "Rwanda",
+    code: "+250",
+    flag: "🇷🇼",
+    lat: -1.9403,
+    lng: 29.8739,
+    iso2: "RW",
+  },
+  {
+    country: "Saint Kitts and Nevis",
+    code: "+1869",
+    flag: "🇰🇳",
+    lat: 17.3578,
+    lng: -62.783,
+    iso2: "KN",
+  },
+  {
+    country: "Saint Lucia",
+    code: "+1758",
+    flag: "🇱🇨",
+    lat: 13.9094,
+    lng: -60.9789,
+    iso2: "LC",
+  },
+  {
+    country: "Saint Vincent and the Grenadines",
+    code: "+1784",
+    flag: "🇻🇨",
+    lat: 13.2505,
+    lng: -61.2008,
+    iso2: "VC",
+  },
+  {
+    country: "Samoa",
+    code: "+685",
+    flag: "🇼🇸",
+    lat: -13.759,
+    lng: -172.1046,
+    iso2: "WS",
+  },
+  {
+    country: "San Marino",
+    code: "+378",
+    flag: "🇸🇲",
+    lat: 43.9424,
+    lng: 12.4578,
+    iso2: "SM",
+  },
+  {
+    country: "Sao Tome and Principe",
+    code: "+239",
+    flag: "🇸🇹",
+    lat: 0.1864,
+    lng: 6.6131,
+    iso2: "ST",
+  },
+  {
+    country: "Saudi Arabia",
+    code: "+966",
+    flag: "🇸🇦",
+    lat: 23.8859,
+    lng: 45.0792,
+    iso2: "SA",
+  },
+  {
+    country: "Senegal",
+    code: "+221",
+    flag: "🇸🇳",
+    lat: 14.4974,
+    lng: -14.4524,
+    iso2: "SN",
+  },
+  {
+    country: "Serbia",
+    code: "+381",
+    flag: "🇷🇸",
+    lat: 44.0165,
+    lng: 21.0059,
+    iso2: "RS",
+  },
+  {
+    country: "Seychelles",
+    code: "+248",
+    flag: "🇸🇨",
+    lat: -4.6796,
+    lng: 55.492,
+    iso2: "SC",
+  },
+  {
+    country: "Sierra Leone",
+    code: "+232",
+    flag: "🇸🇱",
+    lat: 8.4606,
+    lng: -11.7799,
+    iso2: "SL",
+  },
+  {
+    country: "Singapore",
+    code: "+65",
+    flag: "🇸🇬",
+    lat: 1.3521,
+    lng: 103.8198,
+    iso2: "SG",
+  },
+  {
+    country: "Slovakia",
+    code: "+421",
+    flag: "🇸🇰",
+    lat: 48.669,
+    lng: 19.699,
+    iso2: "SK",
+  },
+  {
+    country: "Slovenia",
+    code: "+386",
+    flag: "🇸🇮",
+    lat: 46.1512,
+    lng: 14.9955,
+    iso2: "SI",
+  },
+  {
+    country: "Solomon Islands",
+    code: "+677",
+    flag: "🇸🇧",
+    lat: -9.6457,
+    lng: 160.1562,
+    iso2: "SB",
+  },
+  {
+    country: "Somalia",
+    code: "+252",
+    flag: "🇸🇴",
+    lat: 5.1521,
+    lng: 46.1996,
+    iso2: "SO",
+  },
+  {
+    country: "South Africa",
+    code: "+27",
+    flag: "🇿🇦",
+    lat: -30.5595,
+    lng: 22.9375,
+    iso2: "ZA",
+  },
+  {
+    country: "South Korea",
+    code: "+82",
+    flag: "🇰🇷",
+    lat: 35.9078,
+    lng: 127.7692,
+    iso2: "KR",
+  },
+  {
+    country: "South Sudan",
+    code: "+211",
+    flag: "🇸🇸",
+    lat: 6.877,
+    lng: 31.307,
+    iso2: "SS",
+  },
+  {
+    country: "Spain",
+    code: "+34",
+    flag: "🇪🇸",
+    lat: 40.4637,
+    lng: -3.7492,
+    iso2: "ES",
+  },
+  {
+    country: "Sri Lanka",
+    code: "+94",
+    flag: "🇱🇰",
+    lat: 7.8731,
+    lng: 80.7718,
+    iso2: "LK",
+  },
+  {
+    country: "Sudan",
+    code: "+249",
+    flag: "🇸🇩",
+    lat: 12.8628,
+    lng: 30.2176,
+    iso2: "SD",
+  },
+  {
+    country: "Suriname",
+    code: "+597",
+    flag: "🇸🇷",
+    lat: 3.9193,
+    lng: -56.0278,
+    iso2: "SR",
+  },
+  {
+    country: "Sweden",
+    code: "+46",
+    flag: "🇸🇪",
+    lat: 60.1282,
+    lng: 18.6435,
+    iso2: "SE",
+  },
+  {
+    country: "Switzerland",
+    code: "+41",
+    flag: "🇨🇭",
+    lat: 46.8182,
+    lng: 8.2275,
+    iso2: "CH",
+  },
+  {
+    country: "Syria",
+    code: "+963",
+    flag: "🇸🇾",
+    lat: 34.8021,
+    lng: 38.9968,
+    iso2: "SY",
+  },
+  {
+    country: "Taiwan",
+    code: "+886",
+    flag: "🇹🇼",
+    lat: 23.6978,
+    lng: 120.9605,
+    iso2: "TW",
+  },
+  {
+    country: "Tajikistan",
+    code: "+992",
+    flag: "🇹🇯",
+    lat: 38.861,
+    lng: 71.2761,
+    iso2: "TJ",
+  },
+  {
+    country: "Tanzania",
+    code: "+255",
+    flag: "🇹🇿",
+    lat: -6.369,
+    lng: 34.8888,
+    iso2: "TZ",
+  },
+  {
+    country: "Thailand",
+    code: "+66",
+    flag: "🇹🇭",
+    lat: 15.87,
+    lng: 100.9925,
+    iso2: "TH",
+  },
+  {
+    country: "Togo",
+    code: "+228",
+    flag: "🇹🇬",
+    lat: 8.6195,
+    lng: 0.8248,
+    iso2: "TG",
+  },
+  {
+    country: "Tonga",
+    code: "+676",
+    flag: "🇹🇴",
+    lat: -20.4298,
+    lng: -174.989,
+    iso2: "TO",
+  },
+  {
+    country: "Trinidad and Tobago",
+    code: "+1868",
+    flag: "🇹🇹",
+    lat: 10.6918,
+    lng: -61.2225,
+    iso2: "TT",
+  },
+  {
+    country: "Tunisia",
+    code: "+216",
+    flag: "🇹🇳",
+    lat: 33.8869,
+    lng: 9.5375,
+    iso2: "TN",
+  },
+  {
+    country: "Turkey",
+    code: "+90",
+    flag: "🇹🇷",
+    lat: 38.9637,
+    lng: 35.2433,
+    iso2: "TR",
+  },
+  {
+    country: "Turkmenistan",
+    code: "+993",
+    flag: "🇹🇲",
+    lat: 38.9697,
+    lng: 59.5563,
+    iso2: "TM",
+  },
+  {
+    country: "Tuvalu",
+    code: "+688",
+    flag: "🇹🇻",
+    lat: -7.1095,
+    lng: 177.6493,
+    iso2: "TV",
+  },
+  {
+    country: "Uganda",
+    code: "+256",
+    flag: "🇺🇬",
+    lat: 1.3733,
+    lng: 32.2903,
+    iso2: "UG",
+  },
+  {
+    country: "Ukraine",
+    code: "+380",
+    flag: "🇺🇦",
+    lat: 48.3794,
+    lng: 31.1656,
+    iso2: "UA",
+  },
+  {
+    country: "United Arab Emirates",
+    code: "+971",
+    flag: "🇦🇪",
+    lat: 23.4241,
+    lng: 53.8478,
+    iso2: "AE",
+  },
+  {
+    country: "United Kingdom",
+    code: "+44",
+    flag: "🇬🇧",
+    lat: 55.3781,
+    lng: -3.436,
+    iso2: "GB",
+  },
+  {
+    country: "United States",
+    code: "+1",
+    flag: "🇺🇸",
+    lat: 39.8283,
+    lng: -98.5795,
+    iso2: "US",
+  },
+  {
+    country: "Uruguay",
+    code: "+598",
+    flag: "🇺🇾",
+    lat: -32.5228,
+    lng: -55.7658,
+    iso2: "UY",
+  },
+  {
+    country: "Uzbekistan",
+    code: "+998",
+    flag: "🇺🇿",
+    lat: 41.3775,
+    lng: 64.5853,
+    iso2: "UZ",
+  },
+  {
+    country: "Vanuatu",
+    code: "+678",
+    flag: "🇻🇺",
+    lat: -15.3768,
+    lng: 166.9592,
+    iso2: "VU",
+  },
+  {
+    country: "Vatican City",
+    code: "+379",
+    flag: "🇻🇦",
+    lat: 41.9029,
+    lng: 12.4534,
+    iso2: "VA",
+  },
+  {
+    country: "Venezuela",
+    code: "+58",
+    flag: "🇻🇪",
+    lat: 6.4238,
+    lng: -66.5897,
+    iso2: "VE",
+  },
+  {
+    country: "Vietnam",
+    code: "+84",
+    flag: "🇻🇳",
+    lat: 14.0583,
+    lng: 108.2772,
+    iso2: "VN",
+  },
+  {
+    country: "Yemen",
+    code: "+967",
+    flag: "🇾🇪",
+    lat: 15.5527,
+    lng: 48.5164,
+    iso2: "YE",
+  },
+  {
+    country: "Zambia",
+    code: "+260",
+    flag: "🇿🇲",
+    lat: -13.1339,
+    lng: 27.8493,
+    iso2: "ZM",
+  },
+  {
+    country: "Zimbabwe",
+    code: "+263",
+    flag: "🇿🇼",
+    lat: -19.0154,
+    lng: 29.1549,
+    iso2: "ZW",
+  },
 ].sort((a, b) => a.country.localeCompare(b.country));
 
 // Helper to check if locationData has coordinates (needed for saving)
@@ -243,9 +1616,12 @@ const isLocationSet = (loc) => loc && loc.location?.coordinates?.[0] !== 0;
 
 // Helper to map user address fields to product warehouse fields
 const mapAddressToWarehouse = (address) => {
-  if (!address || !address.location || !address.location.coordinates) return null;
+  if (!address || !address.location || !address.location.coordinates)
+    return null;
   return {
-    address: `${address.label}: ${address.addressLine1} ${address.addressLine2 || ""}`,
+    address: `${address.label}: ${address.addressLine1} ${
+      address.addressLine2 || ""
+    }`,
     location: {
       type: "Point",
       coordinates: address.location.coordinates,
@@ -259,9 +1635,22 @@ const mapAddressToWarehouse = (address) => {
 // Helper to decode user info for setting initial address form data
 function getUserInfoFromToken() {
   if (typeof window === "undefined")
-    return { id: null, email: null, name: null, phone: null, isLoggedIn: false };
+    return {
+      id: null,
+      email: null,
+      name: null,
+      phone: null,
+      isLoggedIn: false,
+    };
   const token = localStorage.getItem("token");
-  if (!token) return { id: null, email: null, name: null, phone: null, isLoggedIn: false };
+  if (!token)
+    return {
+      id: null,
+      email: null,
+      name: null,
+      phone: null,
+      isLoggedIn: false,
+    };
   try {
     const payload = JSON.parse(atob(token.split(".")[1]));
     return {
@@ -272,7 +1661,13 @@ function getUserInfoFromToken() {
       isLoggedIn: true,
     };
   } catch (e) {
-    return { id: null, email: null, name: null, phone: null, isLoggedIn: false };
+    return {
+      id: null,
+      email: null,
+      name: null,
+      phone: null,
+      isLoggedIn: false,
+    };
   }
 }
 
@@ -282,6 +1677,7 @@ function getUserInfoFromToken() {
 
 export default function NewProductPage() {
   const { isLoading: isAuthLoading } = useAuthGuard("WHOLESALER");
+  const [minOrderQuantity, setMinOrderQuantity] = useState("1");
   const router = useRouter();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -321,7 +1717,9 @@ export default function NewProductPage() {
       setSelectedAddressId(addressId);
       setIsAddressModalOpen(false);
 
-      const selected = userAddresses.find((addr) => addr._id.toString() === addressId);
+      const selected = userAddresses.find(
+        (addr) => addr._id.toString() === addressId
+      );
       if (selected) {
         setLocationData(mapAddressToWarehouse(selected));
       } else {
@@ -336,7 +1734,9 @@ export default function NewProductPage() {
   const handleManufactureAddressSelect = useCallback(
     (addressId) => {
       setIsManufactureModalOpen(false);
-      const selected = userAddresses.find((addr) => addr._id.toString() === addressId);
+      const selected = userAddresses.find(
+        (addr) => addr._id.toString() === addressId
+      );
       if (selected) {
         setManufacturedAt(mapAddressToWarehouse(selected));
       } else {
@@ -349,7 +1749,8 @@ export default function NewProductPage() {
 
   // Save new address to profile (called from AddressCreationForm via modal)
   const handleSaveNewAddressToProfile = useCallback(
-    async (newAddress, isManufacture = false) => { // Added isManufacture parameter
+    async (newAddress, isManufacture = false) => {
+      // Added isManufacture parameter
       const token = localStorage.getItem("token");
       if (!token) return;
 
@@ -376,7 +1777,9 @@ export default function NewProductPage() {
         setUserAddresses(updatedUser.addresses);
 
         const newAddressId =
-          updatedUser.addresses[updatedUser.addresses.length - 1]._id.toString();
+          updatedUser.addresses[
+            updatedUser.addresses.length - 1
+          ]._id.toString();
 
         // Conditional update logic based on which modal triggered the save
         if (isManufacture) {
@@ -494,13 +1897,17 @@ export default function NewProductPage() {
     e.preventDefault();
 
     if (!locationData || !isLocationSet(locationData)) {
-      setError("Please select a saved address to use as the warehouse location.");
+      setError(
+        "Please select a saved address to use as the warehouse location."
+      );
       return;
     }
-    
+
     // --- NEW VALIDATION ---
     if (!manufacturedAt || !isLocationSet(manufacturedAt)) {
-      setError("Please select a saved address to use as the place of manufacture.");
+      setError(
+        "Please select a saved address to use as the place of manufacture."
+      );
       return;
     }
     // ----------------------
@@ -538,7 +1945,8 @@ export default function NewProductPage() {
           countryOfOrigin: manufacturedAt.country || "Unknown",
         },
         warehouses: [locationData],
-        manufacturedAt: manufacturedAt, // <--- NEW FIELD ADDED
+        manufacturedAt: manufacturedAt,
+        minOrderQuantity: Number(minOrderQuantity) || 1,
       };
 
       const token = localStorage.getItem("token");
@@ -651,6 +2059,19 @@ export default function NewProductPage() {
                   </div>
                 </div>
                 <div className="space-y-2">
+                  <Label>Minimum Order Quantity (MOQ)</Label>
+                  <Input
+                    type="number"
+                    value={minOrderQuantity}
+                    onChange={(e) => setMinOrderQuantity(e.target.value)}
+                    placeholder="e.g. 10"
+                    min="1"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Retailers must buy at least this many units.
+                  </p>
+                </div>
+                <div className="space-y-2">
                   <Label>Categories / Tags</Label>
                   <TagsInput tags={tags} setTags={setTags} />
                 </div>
@@ -674,7 +2095,9 @@ export default function NewProductPage() {
                 ) : (
                   <>
                     <div className="space-y-2">
-                      <Label htmlFor="address-select">Choose Warehouse Address</Label>
+                      <Label htmlFor="address-select">
+                        Choose Warehouse Address
+                      </Label>
 
                       <Button
                         type="button"
@@ -703,8 +2126,8 @@ export default function NewProductPage() {
                       <Alert variant="secondary">
                         <AlertTitle>Address Management</AlertTitle>
                         <AlertDescription>
-                          You have no saved addresses. Please use the button to add
-                          your first one.
+                          You have no saved addresses. Please use the button to
+                          add your first one.
                         </AlertDescription>
                       </Alert>
                     ) : (
@@ -746,7 +2169,9 @@ export default function NewProductPage() {
                 ) : (
                   <>
                     <div className="space-y-2">
-                      <Label htmlFor="manufacture-address-select">Choose Location</Label>
+                      <Label htmlFor="manufacture-address-select">
+                        Choose Location
+                      </Label>
 
                       <Button
                         type="button"
@@ -771,25 +2196,23 @@ export default function NewProductPage() {
                       </Button>
                     </div>
 
-                    {manufacturedAt &&
-                      isLocationSet(manufacturedAt) && (
-                        <Alert className="mt-4 text-xs">
-                          <MapPin className="h-4 w-4" />
-                          <AlertTitle>Manufacture Address Selected</AlertTitle>
-                          <AlertDescription>
-                            {manufacturedAt.address} <br />
-                            {manufacturedAt.city}, {manufacturedAt.state},{" "}
-                            {manufacturedAt.country}
-                            <div className="mt-1 font-medium">
-                              Coordinates Set.
-                            </div>
-                            <div className="text-xs mt-1">
-                               Product Country of Origin: {manufacturedAt.country}
-                            </div>
-                          </AlertDescription>
-                        </Alert>
-                      )
-                    }
+                    {manufacturedAt && isLocationSet(manufacturedAt) && (
+                      <Alert className="mt-4 text-xs">
+                        <MapPin className="h-4 w-4" />
+                        <AlertTitle>Manufacture Address Selected</AlertTitle>
+                        <AlertDescription>
+                          {manufacturedAt.address} <br />
+                          {manufacturedAt.city}, {manufacturedAt.state},{" "}
+                          {manufacturedAt.country}
+                          <div className="mt-1 font-medium">
+                            Coordinates Set.
+                          </div>
+                          <div className="text-xs mt-1">
+                            Product Country of Origin: {manufacturedAt.country}
+                          </div>
+                        </AlertDescription>
+                      </Alert>
+                    )}
                   </>
                 )}
               </CardContent>
@@ -819,7 +2242,9 @@ export default function NewProductPage() {
                       />
                     </div>
                     <div className="col-span-4 space-y-2">
-                      <Label htmlFor={`size-sku-${index}`}>SKU (Optional)</Label>
+                      <Label htmlFor={`size-sku-${index}`}>
+                        SKU (Optional)
+                      </Label>
                       <Input
                         id={`size-sku-${index}`}
                         value={size.sku}
@@ -943,7 +2368,9 @@ export default function NewProductPage() {
                     <div className="flex flex-col items-center justify-center pt-5 pb-6">
                       <Upload className="w-8 h-8 mb-4 text-gray-500" />
                       <p className="text-sm text-gray-500">
-                        <span className="font-semibold">Upload chart image</span>
+                        <span className="font-semibold">
+                          Upload chart image
+                        </span>
                       </p>
                     </div>
                   )}
@@ -968,7 +2395,9 @@ export default function NewProductPage() {
         addresses={userAddresses}
         currentSelectedId={selectedAddressId}
         onAddressSelect={handleAddressSelectFromModal}
-        onSaveNewAddress={(newAddress) => handleSaveNewAddressToProfile(newAddress, false)}
+        onSaveNewAddress={(newAddress) =>
+          handleSaveNewAddressToProfile(newAddress, false)
+        }
         userDetails={userDetails}
       />
 
@@ -978,9 +2407,23 @@ export default function NewProductPage() {
         onClose={() => setIsManufactureModalOpen(false)}
         addresses={userAddresses}
         // Match the current manufacturedAt coordinates to find the saved ID, or pass null
-        currentSelectedId={manufacturedAt ? userAddresses.find(a => a.location?.coordinates[0] === manufacturedAt.location?.coordinates[0] && a.location?.coordinates[1] === manufacturedAt.location?.coordinates[1])?._id.toString() : null}
+        currentSelectedId={
+          manufacturedAt
+            ? userAddresses
+                .find(
+                  (a) =>
+                    a.location?.coordinates[0] ===
+                      manufacturedAt.location?.coordinates[0] &&
+                    a.location?.coordinates[1] ===
+                      manufacturedAt.location?.coordinates[1]
+                )
+                ?._id.toString()
+            : null
+        }
         onAddressSelect={handleManufactureAddressSelect}
-        onSaveNewAddress={(newAddress) => handleSaveNewAddressToProfile(newAddress, true)} // Pass true to identify the context
+        onSaveNewAddress={(newAddress) =>
+          handleSaveNewAddressToProfile(newAddress, true)
+        } // Pass true to identify the context
         userDetails={userDetails}
       />
       {/* -------------------------------------------------- */}
@@ -1034,13 +2477,17 @@ function AddressSelectionAndCreationModal({
               firstName: userDetails.name?.split(" ")[0],
               lastName: userDetails.name?.split(" ").slice(1).join(" ") || "",
               phone: userDetails.phone,
-              countryCode: COUNTRY_DATA.find(c => c.iso2 === "IN")?.code || COUNTRY_DATA[0].code,
+              countryCode:
+                COUNTRY_DATA.find((c) => c.iso2 === "IN")?.code ||
+                COUNTRY_DATA[0].code,
               addressLine1: "",
               addressLine2: "",
               city: "",
               state: "",
               pincode: "",
-              country: COUNTRY_DATA.find(c => c.iso2 === "IN")?.country || COUNTRY_DATA[0].country,
+              country:
+                COUNTRY_DATA.find((c) => c.iso2 === "IN")?.country ||
+                COUNTRY_DATA[0].country,
               location: { type: "Point", coordinates: [0, 0] },
             }}
           />
@@ -1138,7 +2585,7 @@ function AddressCreationForm({
     libraries: libraries,
   });
 
-  const defaultCenter = useMemo(() => ({ lat: 28.6139, lng: 77.2090 }), []); // New Delhi, India
+  const defaultCenter = useMemo(() => ({ lat: 28.6139, lng: 77.209 }), []); // New Delhi, India
 
   const [address, setAddress] = useState(initialAddress);
   const [pinAddressText, setPinAddressText] = useState("");
@@ -1148,7 +2595,7 @@ function AddressCreationForm({
   const mapRef = useRef(null);
 
   // ADDED: Ref to hold the setValue function from AddressAutocomplete
-  const addressSearchSetValueRef = useRef(null); 
+  const addressSearchSetValueRef = useRef(null);
 
   // Track if user has manually chosen a location (search/click/drag)
   const hasManualLocationRef = useRef(false);
@@ -1182,7 +2629,13 @@ function AddressCreationForm({
   }, [initialAddress, isLoaded, defaultCenter]);
 
   const updateLocationAndAddress = useCallback(
-    async (lat, lng, pan = true, isGeolocated = false, addressSourceText = null) => {
+    async (
+      lat,
+      lng,
+      pan = true,
+      isGeolocated = false,
+      addressSourceText = null
+    ) => {
       const latLng = { lat, lng };
       setMarkerPosition(latLng);
       setMapCenter(latLng);
@@ -1194,10 +2647,10 @@ function AddressCreationForm({
           results[0]?.formatted_address || "Pinned Location";
 
         setPinAddressText(`Current pin: ${addressDescription}`);
-        
+
         // FIXED: Update Address Autocomplete search box text without triggering a new search
         if (addressSearchSetValueRef.current) {
-            addressSearchSetValueRef.current(addressDescription, false);
+          addressSearchSetValueRef.current(addressDescription, false);
         }
 
         let newAddr = {
@@ -1276,7 +2729,10 @@ function AddressCreationForm({
             (c) => c.code === initial?.countryCode
           );
           if (isLoaded && selectedCountry) {
-            setMapCenter({ lat: selectedCountry.lat, lng: selectedCountry.lng });
+            setMapCenter({
+              lat: selectedCountry.lat,
+              lng: selectedCountry.lng,
+            });
           } else if (isLoaded) {
             setMapCenter(defaultCenter);
           }
@@ -1357,9 +2813,9 @@ function AddressCreationForm({
       setAddress((prev) => ({ ...prev, countryCode: newCode }));
     }
   }, []);
-  
+
   const handleChange = (field, value) => {
-      setAddress((prev) => ({ ...prev, [field]: value }));
+    setAddress((prev) => ({ ...prev, [field]: value }));
   };
 
   const handleSave = (e) => {
@@ -1438,9 +2894,9 @@ function AddressCreationForm({
         {/* Address + Map */}
         <div className="space-y-2">
           <Label htmlFor="addressSearch">Address (Search & Pin)</Label>
-          <AddressAutocomplete 
-            onSelect={handlePlaceSelect} 
-            setExternalValueRef={addressSearchSetValueRef} 
+          <AddressAutocomplete
+            onSelect={handlePlaceSelect}
+            setExternalValueRef={addressSearchSetValueRef}
           />
 
           <Button
@@ -1675,17 +3131,17 @@ function AddressAutocomplete({ onSelect, setExternalValueRef }) {
   } = usePlacesAutocomplete({
     // FIXED: Restrict searches to India
     requestOptions: {
-      componentRestrictions: { country: "in" } 
+      componentRestrictions: { country: "in" },
     },
     debounce: 300,
   });
-  
+
   // FIXED: Expose setValue to parent via ref
   useEffect(() => {
-      if (setExternalValueRef) {
-          setExternalValueRef.current = setValue;
-          return () => setExternalValueRef.current = null; // Cleanup
-      }
+    if (setExternalValueRef) {
+      setExternalValueRef.current = setValue;
+      return () => (setExternalValueRef.current = null); // Cleanup
+    }
   }, [setValue, setExternalValueRef]);
 
   const handleSelect = async (addressDescription) => {

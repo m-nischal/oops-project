@@ -66,4 +66,4 @@ Thumbs.db
 !.git-blame-ignore-revs
 !.gitignore
 !.nvmrc
-!.phpcs.xml.dist
+!.phpcs.xml.dist.next/

@@ -40,6 +40,13 @@ export default async function handler(req, res) {
     const product = await Product.findById(productId);
     if (!product) return res.status(404).json({ error: "Product not found" });
 
+    const minQty = product.minOrderQuantity || 1;
+    if (Number(qty) < minQty) {
+        return res.status(400).json({ 
+            error: `Order quantity ${qty} is below the minimum of ${minQty} for this product.` 
+        });
+    }
+
     const sellerId = product.ownerId; // This is the Wholesaler
 
     // 4. Construct Order Data

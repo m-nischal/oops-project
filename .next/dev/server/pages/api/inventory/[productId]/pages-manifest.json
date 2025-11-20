@@ -1,3 +1,0 @@
-{
-  "/api/inventory/[productId]": "pages/api/inventory/[productId].js"
-}

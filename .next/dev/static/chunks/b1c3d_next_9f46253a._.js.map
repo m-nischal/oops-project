@@ -1,7 +1,0 @@
-{
-  "version": 3,
-  "sources": [],
-  "sections": [
-    {"offset": {"line": 3, "column": 0}, "map": {"version":3,"sources":["file:///C:/Users/rajag/OneDrive/Desktop/vamsi/oops%20project/livemart-19112025/Project%20OOPS/node_modules/next/router.js"],"sourcesContent":["module.exports = require('./dist/client/router')\n"],"names":[],"mappings":"AAAA,OAAO,OAAO","ignoreList":[0],"debugId":null}},
-    {"offset": {"line": 7, "column": 0}, "map": {"version":3,"sources":["file:///C:/Users/rajag/OneDrive/Desktop/vamsi/oops%20project/livemart-19112025/Project%20OOPS/node_modules/next/link.js"],"sourcesContent":["module.exports = require('./dist/client/link')\n"],"names":[],"mappings":"AAAA,OAAO,OAAO","ignoreList":[0],"debugId":null}}]
-}
