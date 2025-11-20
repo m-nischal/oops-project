@@ -1,0 +1,3 @@
+{
+  "/api/wholesaler/products/[id]": "pages/api/wholesaler/products/[id].js"
+}

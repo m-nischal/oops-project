@@ -1,0 +1,11 @@
+// jsconfig.json
+{
+  "compilerOptions": {
+    "baseUrl": "src", // <-- Set baseUrl to 'src'
+    "paths": {
+      "@/*": ["*"]     // <-- Change path to just '*'
+    }
+  },
+  "exclude": ["node_modules"],
+  "include": ["src"]
+}

@@ -1,0 +1,3 @@
+{
+  "/api/auth/forgot/verify": "pages/api/auth/forgot/verify.js"
+}

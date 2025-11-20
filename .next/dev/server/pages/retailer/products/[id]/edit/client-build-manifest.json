@@ -1,0 +1,5 @@
+{
+  "/retailer/products/[id]/edit": [
+    "static/chunks/pages/retailer/products/[id]/edit.js"
+  ]
+}

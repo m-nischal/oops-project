@@ -1,0 +1,93 @@
+// src/pages/api/retailer/analytics.js
+import dbConnect from "../../../lib/dbConnect";
+import Order from "../../../models/orderModel";
+import { verifyToken } from "../../../lib/auth"; //
+import mongoose from "mongoose";
+
+export default async function handler(req, res) {
+  await dbConnect();
+
+  if (req.method !== "GET") {
+    res.setHeader("Allow", ["GET"]);
+    return res.status(405).end(`Method ${req.method} Not Allowed`);
+  }
+
+  // --- 1. Real Authentication ---
+  let payload;
+  try {
+    payload = verifyToken(req); //
+
+    // --- THIS IS THE FIX ---
+    // We now check for the 'RETAILER' role
+    if (!payload || payload.role !== "RETAILER") {
+      return res
+        .status(401)
+        .json({ error: "Unauthorized. You must be a Retailer." }); // Updated error message
+    }
+    // --- END FIX ---
+
+  } catch (err) {
+    return res.status(401).json({ error: "Unauthorized. Invalid token." });
+  }
+
+  const sellerId = new mongoose.Types.ObjectId(payload.id); // Get the logged-in seller's ID
+
+  // --- 2. Fetch Dashboard Analytics (Logic is identical) ---
+  try {
+    const allOrders = await Order.find({ sellerId: sellerId }).lean(); //
+
+    let totalSales = 0;
+    let activeOrders = 0;
+    let completedOrders = 0;
+
+    for (const order of allOrders) {
+      if (order.status === "delivered") {
+        completedOrders++;
+        totalSales += order.total || 0;
+      } else if (order.status !== "cancelled" && order.status !== "refunded") {
+        activeOrders++;
+      }
+    }
+
+    const oneYearAgo = new Date();
+    oneYearAgo.setFullYear(oneYearAgo.getFullYear() - 1);
+
+    const salesData = await Order.aggregate([
+      {
+        $match: {
+          sellerId: sellerId,
+          status: "delivered",
+          createdAt: { $gte: oneYearAgo },
+        },
+      },
+      {
+        $group: {
+          _id: {
+            year: { $year: "$createdAt" },
+            month: { $month: "$createdAt" },
+          },
+          totalRevenue: { $sum: "$total" },
+        },
+      },
+      { $sort: { "_id.year": 1, "_id.month": 1 } },
+    ]);
+
+    const formattedSalesGraph = salesData.map((item) => ({
+      month: `${item._id.year}-${String(item._id.month).padStart(2, "0")}`,
+      sales: item.totalRevenue,
+    }));
+
+    return res.status(200).json({
+      stats: {
+        totalSales: totalSales,
+        totalOrders: allOrders.length,
+        activeOrders: activeOrders,
+        completedOrders: completedOrders,
+      },
+      saleGraph: formattedSalesGraph,
+    });
+  } catch (err) {
+    console.error("Failed to fetch analytics:", err);
+    return res.status(500).json({ error: "Failed to fetch analytics" });
+  }
+}

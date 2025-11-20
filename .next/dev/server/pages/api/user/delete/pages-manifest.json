@@ -1,0 +1,3 @@
+{
+  "/api/user/delete": "pages/api/user/delete.js"
+}

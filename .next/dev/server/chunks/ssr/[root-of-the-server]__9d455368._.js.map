@@ -1,0 +1,6 @@
+{
+  "version": 3,
+  "sources": [],
+  "sections": [
+    {"offset": {"line": 10, "column": 0}, "map": {"version":3,"sources":["file:///C:/Users/rajag/OneDrive/Desktop/vamsi/oops%20project/livemart-19112025/Project%20OOPS/src/pages/_app.js"],"sourcesContent":["// src/pages/_app.js\nimport '@/styles/globals.css' // Or whatever your CSS file is named\nimport React from \"react\";\n// import LeftSidebar from \"../components/LeftSidebar\";\n\nexport default function App({ Component, pageProps }) {\n  return (\n    <>\n      {/*<LeftSidebar />*/}\n      <Component {...pageProps} />\n    </>\n  );\n}\n"],"names":[],"mappings":"AAAA,oBAAoB;;;;;;AAEpB;;;;AAGe,SAAS,IAAI,EAAE,SAAS,EAAE,SAAS,EAAE;IAClD,qBACE;kBAEE,cAAA,qKAAC;YAAW,GAAG,SAAS;;;;;;;AAG9B","debugId":null}}]
+}
