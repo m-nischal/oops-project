@@ -1,18 +1,12 @@
 // src/pages/login.js
-import { useState, useEffect } from "react";
-import { redirectIfLoggedIn } from "../utils/redirectByRole";
+import { useState } from "react";
+import { redirectByRole } from "../utils/redirectByRole";
 
 export default function LoginPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [message, setMessage] = useState("");
-
-  // Redirect if already logged in (client-only)
-  useEffect(() => {
-    if (typeof window !== "undefined") {
-      redirectIfLoggedIn();
-    }
-  }, []);
+  const [loading, setLoading] = useState(false);
 
   function isEmail(value) {
     return typeof value === "string" && value.includes("@") && value.indexOf("@") > 0;
@@ -21,15 +15,18 @@ export default function LoginPage() {
   async function handleLogin(e) {
     e.preventDefault();
     setMessage("");
+    setLoading(true);
 
     const trimmedEmail = email.trim().toLowerCase();
     if (!isEmail(trimmedEmail)) {
       setMessage("Please enter a valid email.");
+      setLoading(false);
       return;
     }
 
     if (!password) {
       setMessage("Please enter your password.");
+      setLoading(false);
       return;
     }
 
@@ -45,62 +42,59 @@ export default function LoginPage() {
 
       if (!data.ok) {
         setMessage(data.message || "Invalid login");
+        setLoading(false);
         return;
       }
 
-      // legacy storage — optional
+      // Legacy token storage
       if (data.token) {
         try { localStorage.setItem("token", data.token); } catch (_) {}
       }
 
-      // Determine role
-      let role = null;
-
-      // From token payload
-      if (data.token) {
-        try {
-          const payload = JSON.parse(atob(data.token.split(".")[1]));
-          role = payload.role?.toUpperCase();
-        } catch (_) {}
+      // SUCCESS: Redirect based on role
+      if (data.user) {
+        redirectByRole(data.user);
+      } else {
+        window.location.href = "/";
       }
-
-      // fallback
-      if (!role && data.user?.role) role = data.user.role.toUpperCase();
-
-      // redirect by role
-      if (role === "RETAILER") window.location.href = "/retailer/dashboard";
-      else if (role === "WHOLESALER") window.location.href = "/wholesaler/dashboard";
-      else if (role === "DELIVERY") window.location.href = "/delivery/assigned";
-      else window.location.href = "/customer/home";
 
     } catch (err) {
       console.error("Login error:", err);
       setMessage("Network error — please try again.");
+      setLoading(false);
     }
   }
 
   return (
-    <div style={{ padding: 24 }}>
+    <div style={{ padding: 24, maxWidth: 400, margin: "0 auto" }}>
       <h2>Login</h2>
 
       <form onSubmit={handleLogin}>
-        <input
-          type="email"
-          placeholder="Email"
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          style={{ display: "block", marginBottom: 10 }}
-        />
+        <div style={{ marginBottom: 10 }}>
+          <input
+            type="email"
+            placeholder="Email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            style={{ display: "block", width: "100%", padding: 8 }}
+            required
+          />
+        </div>
 
-        <input
-          type="password"
-          placeholder="Password"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          style={{ display: "block", marginBottom: 10 }}
-        />
+        <div style={{ marginBottom: 10 }}>
+          <input
+            type="password"
+            placeholder="Password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            style={{ display: "block", width: "100%", padding: 8 }}
+            required
+          />
+        </div>
 
-        <button type="submit">Login</button>
+        <button type="submit" disabled={loading} style={{ padding: "8px 16px" }}>
+          {loading ? "Logging in..." : "Login"}
+        </button>
 
         <div style={{ marginTop: 10 }}>
           <a href="/forgot-password">Forgot password?</a>

@@ -1,72 +1,94 @@
-// src/pages/index.js
-import { useEffect, useState } from "react";
-import Header from "components/Header";
-import ProductCard from "components/ProductCard";
-import { redirectIfLoggedIn } from "../utils/redirectByRole"; // added by vamsi
+import React, { useEffect, useState } from 'react';
+import { useRouter } from 'next/router';
+import CustomerNavbar from '@/components/CustomerNavbar';
+import HeroSection from '@/components/home/HeroSection';
+import BrandStrip from '@/components/home/BrandStrip';
+import NewArrivals from '@/components/home/NewArrivals';
+import LocalProducts from '@/components/home/LocalProducts';
+import BrowseByStyle from '@/components/home/BrowseByStyle'; // <--- Import Added
+import { Loader2 } from 'lucide-react';
 
-export default function Home() {
-  // redirect helper (if already logged-in this will navigate away)
+export default function HomePage() {
+  const router = useRouter();
+  const [isLoading, setIsLoading] = useState(true);
+
   useEffect(() => {
-    redirectIfLoggedIn();
-  }, []);
+    // Check who is viewing the page
+    async function checkUserRole() {
+      try {
+        const res = await fetch("/api/auth/me", { credentials: "include" });
+        
+        // If not logged in, allow guest access
+        if (!res.ok) {
+          setIsLoading(false);
+          return;
+        }
 
-  // products / search state
-  const [products, setProducts] = useState([]);
-  const [q, setQ] = useState("");
-  const [loading, setLoading] = useState(false);
+        const data = await res.json();
+        const user = data.user;
 
-  async function load(qstr = "") {
-    setLoading(true);
-    try {
-      const url = `/api/products?q=${encodeURIComponent(qstr)}&limit=50`;
-      const res = await fetch(url);
-      const data = await res.json();
-      // normalize items shape and unwrap product wrapper if present
-      const items = (data.items || data.products || data || []).map(p =>
-        p && p.product ? p.product : p
-      );
-      setProducts(items);
-    } catch (e) {
-      console.error("Failed to load products:", e);
-    } finally {
-      setLoading(false);
+        // Redirect Business/Delivery roles to their dashboards
+        if (user && ["RETAILER", "WHOLESALER", "ADMIN", "DELIVERY"].includes(user.role)) {
+          if (user.role === "RETAILER") router.replace("/retailer/dashboard");
+          else if (user.role === "WHOLESALER") router.replace("/wholesaler/dashboard");
+          else if (user.role === "DELIVERY") router.replace("/delivery/assigned");
+          else router.replace("/admin");
+          return; 
+        }
+
+        // Customers stay here
+        setIsLoading(false);
+
+      } catch (e) {
+        setIsLoading(false);
+      }
     }
+
+    checkUserRole();
+  }, [router]);
+
+  if (isLoading) {
+    return (
+      <div className="flex justify-center items-center h-screen bg-white">
+        <Loader2 className="h-8 w-8 animate-spin text-gray-400" />
+      </div>
+    );
   }
 
-  // initial load
-  useEffect(() => {
-    load();
-  }, []);
-
   return (
-    <div>
-      <Header />
-      <main style={{ padding: 20 }}>
-        {/* If redirect runs it will navigate away; while on this page show register/login links */}
-        <div style={{ marginBottom: 12 }}>
-          Welcome to LiveMart.{" "}
-          
-          <a href="/register">Sign up</a> / <a href="/login">Login</a>
+    <div className="bg-white font-sans">
+      
+      {/* LANDING SCREEN WRAPPER */}
+      <div className="min-h-screen flex flex-col">
+        {/* 1. Top Bar */}
+        <CustomerNavbar />
+
+        {/* 2. Hero Section */}
+        <HeroSection />
+
+        {/* 3. Brand Strip */}
+        <BrandStrip />
+      </div>
+
+      {/* CONTENT BELOW FOLD */}
+      <main>
+        {/* 4. New Arrivals Section */}
+        <NewArrivals />
+        
+        {/* Divider Line */}
+        <div className="max-w-[1240px] mx-auto px-6">
+            <hr className="border-gray-200" />
         </div>
 
-        {/* Search */}
-        <div style={{ marginBottom: 16 }}>
-          <input
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-            placeholder="Search products..."
-          />
-          <button onClick={() => load(q)} style={{ marginLeft: 8 }}>
-            Search
-          </button>
-        </div>
+        {/* 5. Local Products Section */}
+        <LocalProducts />
 
-        {loading ? <div>Loading products…</div> : null}
-
-        <div style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
-          {products.map((p) => (
-            <ProductCard key={p._id || p.id} product={p} />
-          ))}
+        {/* 6. Browse By Dress Style Section (New) */}
+        <BrowseByStyle />
+        
+        {/* Footer Placeholder */}
+        <div className="py-20 text-center text-gray-400 text-sm">
+          — End of Home Page —
         </div>
       </main>
     </div>

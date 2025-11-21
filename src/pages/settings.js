@@ -1,11 +1,10 @@
-// src/pages/settings.js
 import React, { useState } from 'react';
 import { useRouter } from 'next/router';
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { AlertTriangle, Loader2, LogOut, Trash2, Settings, Mail, Lock } from 'lucide-react'; // Added Mail, Lock
-import { Input } from "@/components/ui/input"; // Added Input
-import { Label } from "@/components/ui/label"; // Added Label
+import { AlertTriangle, Loader2, LogOut, Trash2, Settings, Mail, Lock } from 'lucide-react';
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -17,17 +16,25 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 
 export default function SettingsPage() {
   const router = useRouter();
   const [deleting, setDeleting] = useState(false);
-  const [verificationEmail, setVerificationEmail] = useState(''); // NEW STATE
-  const [verificationPassword, setVerificationPassword] = useState(''); // NEW STATE
-  const [deleteError, setDeleteError] = useState(null); // NEW STATE
+  const [verificationEmail, setVerificationEmail] = useState('');
+  const [verificationPassword, setVerificationPassword] = useState('');
+  const [deleteError, setDeleteError] = useState(null);
 
-  const handleLogout = () => {
-    localStorage.removeItem("token");
-    router.push('/login');
+  const handleLogout = async () => {
+    try {
+        // Clear cookie
+        await fetch("/api/auth/logout", { method: "POST" });
+        // Clear storage
+        localStorage.removeItem("token");
+        router.push('/login');
+    } catch (e) {
+        router.push('/login');
+    }
   };
 
   const handleDeleteAccount = async () => {
@@ -49,7 +56,7 @@ export default function SettingsPage() {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${token}`
         },
-        body: JSON.stringify({ // <--- PASSING CREDENTIALS
+        body: JSON.stringify({
             email: verificationEmail,
             password: verificationPassword
         })
@@ -62,23 +69,21 @@ export default function SettingsPage() {
         throw new Error(errData.error || 'Failed to delete account');
       }
 
-      // Success - Clear local storage and redirect
+      // Success - Logout completely
+      await fetch("/api/auth/logout", { method: "POST" });
       localStorage.removeItem("token");
       alert("Your account has been successfully deleted.");
       router.push('/');
 
     } catch (err) {
       console.error(err);
-      // Error state already set above inside the try block
     } finally {
       setDeleting(false);
-      // Clear fields on success/failure to prevent accidental re-use
       setVerificationEmail('');
       setVerificationPassword('');
     }
   };
   
-  // Helper to reset modal state when closed
   const resetModalState = (open) => {
     if (!open) {
       setVerificationEmail('');
@@ -138,7 +143,6 @@ export default function SettingsPage() {
                   </AlertDialogDescription>
                 </AlertDialogHeader>
                 
-                {/* Re-authentication Inputs */}
                 <div className="space-y-4 pt-2">
                     <div className="space-y-2">
                         <Label htmlFor="verifyEmail" className="flex items-center text-sm font-medium">

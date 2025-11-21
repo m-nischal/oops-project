@@ -1,4 +1,3 @@
-// src/components/WholesalerLayout.jsx
 import React from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/router';
@@ -19,11 +18,10 @@ import {
   Bell,
   Search,
   Store,
-  User, // <-- ADDED
-  Settings, // <--- ADDED: Import the Settings icon
+  User,
+  Settings,
 } from "lucide-react";
 
-// Helper NavLink component (no changes)
 function NavLink({ href, icon: Icon, children }) {
   const router = useRouter();
   const isActive = router.pathname.startsWith(href);
@@ -44,19 +42,20 @@ function NavLink({ href, icon: Icon, children }) {
 }
 
 export default function WholesalerLayout({ children }) {
-  // --- THIS IS THE FIX ---
-  const router = useRouter(); // Get the router
+  const router = useRouter();
   
-  const handleLogout = () => {
-    localStorage.removeItem("token"); //
-    router.push("/login"); //
+  const handleLogout = async () => {
+    try {
+        await fetch("/api/auth/logout", { method: "POST" });
+        localStorage.removeItem("token"); 
+        router.push("/login"); 
+    } catch (e) {
+        router.push("/login");
+    }
   };
-  // --- END FIX ---
 
   return (
     <div className="min-h-screen bg-gray-100/50">
-      
-      {/* --- Sidebar --- */}
       <aside className="fixed top-0 left-0 z-40 flex h-screen w-[250px] flex-col gap-2 border-r bg-gray-900 text-white">
         <div className="flex h-[60px] items-center border-b px-6">
           <Link href="/wholesaler/dashboard" className="flex items-center gap-2 font-semibold">
@@ -78,10 +77,7 @@ export default function WholesalerLayout({ children }) {
         </nav>
       </aside>
 
-      {/* --- Main Content Area --- */}
       <div className="flex flex-col ml-[250px]">
-        
-        {/* --- Top Header Bar --- */}
         <header className="flex h-[60px] items-center gap-4 border-b bg-white px-6 sticky top-0 z-30">
           <div className="flex-1">
             <Search className="h-4 w-4 text-gray-500" />
@@ -101,28 +97,23 @@ export default function WholesalerLayout({ children }) {
             <DropdownMenuContent align="end">
               <DropdownMenuLabel>My Account</DropdownMenuLabel>
               <DropdownMenuSeparator />
-              {/* --- NEW: Profile Link --- */}
               <DropdownMenuItem asChild>
                 <Link href="/profile">
                   <User className="mr-2 h-4 w-4" /> Profile
                 </Link>
               </DropdownMenuItem>
-              {/* --- ADDED: Settings Link --- */}
               <DropdownMenuItem asChild>
                 <Link href="/settings">
                   <Settings className="mr-2 h-4 w-4" /> Settings
                 </Link>
               </DropdownMenuItem>
-              {/* --- THIS IS THE FIX --- */}
-              <DropdownMenuItem onSelect={handleLogout}>
+              <DropdownMenuItem onClick={handleLogout} className="text-red-600 focus:text-red-600">
                 Logout
               </DropdownMenuItem>
-              {/* --- END FIX --- */}
             </DropdownMenuContent>
           </DropdownMenu>
         </header>
 
-        {/* --- Page Content --- */}
         <main className="flex-1 p-6">
           {children}
         </main>

@@ -1,10 +1,10 @@
 // src/pages/register.js
 import { useState, useEffect } from "react";
-import { redirectIfLoggedIn } from "../utils/redirectByRole";
+import { redirectIfLoggedIn, redirectByRole } from "../utils/redirectByRole";
 
 export default function RegisterPage() {
   const [name, setName] = useState("");
-  const [role, setRole] = useState("RETAILER");
+  const [role, setRole] = useState("CUSTOMER");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [otp, setOtp] = useState("");
@@ -13,14 +13,14 @@ export default function RegisterPage() {
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    if (typeof window !== "undefined") redirectIfLoggedIn();
+    redirectIfLoggedIn();
   }, []);
 
   function isProbablyEmail(value) {
     return typeof value === "string" && value.includes("@") && value.indexOf("@") > 0;
   }
 
-  // SEND OTP (only email + role) — button must be type="button"
+  // SEND OTP
   async function handleSendOtp() {
     setMessage("");
     if (!isProbablyEmail(email.trim().toLowerCase())) {
@@ -39,8 +39,7 @@ export default function RegisterPage() {
         setMessage(data.message || "Failed to send OTP");
       } else {
         setOtpSent(true);
-        setMessage("OTP sent. Check your email (or server console in dev).");
-        // you can show the OTP input now
+        setMessage("OTP sent. Check your email.");
       }
     } catch (err) {
       console.error("Send OTP error:", err);
@@ -50,97 +49,87 @@ export default function RegisterPage() {
     }
   }
 
-  // VERIFY OTP (send email + otp); on success, finish registration by posting password
-  // replace existing handleVerifyOtp in src/pages/register.js with this
-async function handleVerifyOtp(e) {
-  e.preventDefault(); // form submission for final registration
-  setMessage("");
+  // VERIFY OTP & REGISTER
+  async function handleVerifyOtp(e) {
+    e.preventDefault(); 
+    setMessage("");
 
-  const trimmedEmail = email.trim().toLowerCase();
-  const code = String(otp || "").trim();
+    const trimmedEmail = email.trim().toLowerCase();
+    const code = String(otp || "").trim();
 
-  if (!isProbablyEmail(trimmedEmail) || !code) {
-    setMessage("Email and OTP required");
-    return;
-  }
-  if (!password || password.length < 6) {
-    setMessage("Please enter a password (min 6 chars) to finish registration.");
-    return;
-  }
-
-  setLoading(true);
-  try {
-    // send otp + password together to verify endpoint (server should set password and return token)
-    const verifyRes = await fetch("/api/auth/otp/verify", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        email: trimmedEmail,
-        // backend accepts either `otp` or `code` — here we send `otp`
-        otp: code,
-        purpose: "register",
-        password: password
-      }),
-    });
-
-    const verifyData = await verifyRes.json().catch(() => null);
-
-    if (!verifyData) {
-      setMessage("Server returned an invalid response during OTP verify.");
-      setLoading(false);
+    if (!isProbablyEmail(trimmedEmail) || !code) {
+      setMessage("Email and OTP required");
+      return;
+    }
+    if (!password || password.length < 6) {
+      setMessage("Please enter a password (min 6 chars) to finish registration.");
       return;
     }
 
-    if (!verifyRes.ok || !verifyData.ok) {
-      setMessage(verifyData.message || "Invalid OTP or verification failed");
-      setLoading(false);
-      return;
-    }
+    setLoading(true);
+    try {
+      const verifyRes = await fetch("/api/auth/otp/verify", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        // Important: 'credentials: include' ensures the new session cookie is saved by the browser
+        credentials: "include", 
+        body: JSON.stringify({
+          email: trimmedEmail,
+          otp: code,
+          purpose: "register",
+          password: password
+        }),
+      });
 
-    // SUCCESS: If backend returns a token, save it and redirect
-    if (verifyData.token) {
-      try {
-        localStorage.setItem("token", verifyData.token);
-        localStorage.removeItem("guest_browsing");
-      } catch (e) {
-        // ignore localStorage errors
+      const verifyData = await verifyRes.json().catch(() => null);
+
+      if (!verifyData || !verifyData.ok) {
+        setMessage(verifyData?.message || "Invalid OTP or verification failed");
+        setLoading(false);
+        return;
       }
 
+      // Legacy support
+      if (verifyData.token) {
+        try { localStorage.setItem("token", verifyData.token); } catch (_) {}
+      }
+
+      // Clear prompt so the new user gets asked for location
+      if (typeof window !== 'undefined') {
+        sessionStorage.removeItem("location_prompt_shown");
+      }
+
+      // Redirect
       try {
         const payload = JSON.parse(atob(verifyData.token.split(".")[1]));
-        if (payload.role === "RETAILER") window.location.href = "/retailer/dashboard";
-        else if (payload.role === "WHOLESALER") window.location.href = "/wholesaler/dashboard";
-        else window.location.href = "/customer/home";
+        const userObj = { role: payload.role || "CUSTOMER" };
+        redirectByRole(userObj);
         return;
       } catch (err) {
-        // fallback
         window.location.href = "/";
         return;
       }
+
+    } catch (err) {
+      console.error("Verify/register error:", err);
+      setMessage("Network/server error. Try again.");
+    } finally {
+      setLoading(false);
     }
-
-    // fallback success message
-    setMessage("Registration complete. Please login.");
-  } catch (err) {
-    console.error("Verify/register error:", err);
-    setMessage("Network/server error. Try again.");
-  } finally {
-    setLoading(false);
   }
-}
-
 
   return (
-    <div style={{ padding: 20 }}>
+    <div style={{ padding: 24, maxWidth: 400, margin: "0 auto" }}>
       <h2>Register / Sign up</h2>
 
       <form onSubmit={handleVerifyOtp}>
-        <label>
+        <label style={{ display: "block", marginTop: 10 }}>
           Name
-          <input value={name} onChange={(e) => setName(e.target.value)} style={{ display: "block", width: 300 }} />
+          <input value={name} onChange={(e) => setName(e.target.value)} style={{ display: "block", width: "100%", padding: 8 }} />
         </label>
 
-        <div style={{ marginTop: 8 }}>
+        <div style={{ marginTop: 15, marginBottom: 15 }}>
+          <span style={{ marginRight: 10 }}>I am a:</span>
           <label>
             <input type="radio" checked={role === "CUSTOMER"} onChange={() => setRole("CUSTOMER")} /> Customer
           </label>
@@ -158,7 +147,7 @@ async function handleVerifyOtp(e) {
             type="email"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
-            style={{ display: "block", width: 300 }}
+            style={{ display: "block", width: "100%", padding: 8 }}
             required
           />
         </label>
@@ -169,20 +158,20 @@ async function handleVerifyOtp(e) {
             type="password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
-            style={{ display: "block", width: 300 }}
+            style={{ display: "block", width: "100%", padding: 8 }}
             required
           />
         </label>
 
-        {/* IMPORTANT: Send OTP is type="button" so it doesn't submit the form */}
         <div style={{ marginTop: 12 }}>
-          <button type="button" onClick={handleSendOtp} disabled={loading}>
-            {loading ? "Sending..." : "Send OTP"}
+          <button type="button" onClick={handleSendOtp} disabled={loading || otpSent}>
+            {loading && !otpSent ? "Sending..." : (otpSent ? "OTP Sent" : "Send OTP")}
           </button>
-          <span style={{ marginLeft: 8, color: "#777" }}>use email to receive otp</span>
+          <span style={{ marginLeft: 8, color: "#777", fontSize: "0.9em" }}>
+            {otpSent ? "Check your email" : "Click to verify email"}
+          </span>
         </div>
 
-        {/* OTP input shown once user requested it (optional) */}
         {otpSent && (
           <div style={{ marginTop: 12 }}>
             <label>
@@ -190,16 +179,17 @@ async function handleVerifyOtp(e) {
               <input
                 value={otp}
                 onChange={(e) => setOtp(e.target.value)}
-                style={{ display: "block", width: 200 }}
+                style={{ display: "block", width: "100%", padding: 8 }}
                 placeholder="6-digit OTP"
+                required
               />
             </label>
           </div>
         )}
 
-        <div style={{ marginTop: 12 }}>
-          <button type="submit" disabled={loading}>
-            {loading ? "Verifying..." : "Verify OTP & Finish Registration"}
+        <div style={{ marginTop: 20 }}>
+          <button type="submit" disabled={loading || !otpSent}>
+            {loading ? "Verifying..." : "Register & Login"}
           </button>
         </div>
       </form>

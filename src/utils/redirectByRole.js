@@ -1,9 +1,7 @@
 // src/utils/redirectByRole.js
-// Client + small helper utilities for role-based redirects.
 
 export function redirectByRole(user) {
   if (!user || !user.role) {
-    // fallback homepage
     window.location.href = "/";
     return;
   }
@@ -28,30 +26,20 @@ export function redirectByRole(user) {
       return;
     case "CUSTOMER":
     default:
-      window.location.href = "/customer/home";
+      // CUSTOMER GOES TO HOME PAGE (localhost:3000)
+      window.location.href = "/"; 
       return;
   }
 }
 
-/**
- * redirectIfLoggedIn()
- * Client-only helper used on login pages to detect an existing session
- * and immediately redirect the user to their role landing page.
- *
- * Usage in components: call inside useEffect on client:
- *   useEffect(() => { redirectIfLoggedIn(); }, []);
- */
+// Helper for client-side redirect on protected pages (not login/register anymore)
 export async function redirectIfLoggedIn() {
   if (typeof window === "undefined") return;
   try {
     const res = await fetch("/api/auth/me", { credentials: "include" });
-    if (!res.ok) return; // not logged in
+    if (!res.ok) return; 
     const data = await res.json();
     if (!data.ok || !data.user) return;
-    // redirect based on role
     redirectByRole(data.user);
-  } catch (e) {
-    // fail silently (no redirect)
-    // console.warn("redirectIfLoggedIn error", e);
-  }
+  } catch (e) {}
 }

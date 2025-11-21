@@ -1,8 +1,9 @@
-// pages/api/auth/otp/verify.js
+// src/pages/api/auth/otp/verify.js
 import dbConnect from "../../../../lib/dbConnect";
 import User from "../../../../models/User";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
+import cookie from "cookie"; // <--- IMPORT ADDED
 
 const JWT_SECRET = process.env.JWT_SECRET || "dev_jwt_secret";
 const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || "7d";
@@ -21,7 +22,6 @@ export default async function handler(req, res) {
     return res.status(405).json({ ok: false, message: "Method not allowed" });
   }
 
-  // accept body fields `otp` or `code`
   const { email, password } = req.body || {};
   const providedCode = (req.body && (req.body.otp || req.body.code)) || null;
 
@@ -32,20 +32,16 @@ export default async function handler(req, res) {
   try {
     const user = await User.findOne({ email: String(email).toLowerCase() });
 
-    console.log("OTP verify request for:", email, "providedCode:", providedCode);
-
     if (!user) {
       return res.status(400).json({ ok: false, message: "Invalid OTP" });
     }
 
-    // Support both shapes: user.otp.code (with expiresAt) or user.resetOtp/resetOtpExpiry
+    // Support both shapes: user.otp.code or user.resetOtp
     const storedHash = (user.otp && user.otp.code) || user.resetOtp || null;
     const expiresAt =
       (user.otp && user.otp.expiresAt && new Date(user.otp.expiresAt).getTime()) ||
       (user.resetOtpExpiry && Number(user.resetOtpExpiry)) ||
       null;
-
-    console.log("Stored hash exists:", !!storedHash, "expiresAt:", expiresAt);
 
     if (!storedHash) {
       return res.status(400).json({ ok: false, message: "Invalid OTP" });
@@ -63,7 +59,6 @@ export default async function handler(req, res) {
 
     const matches = await bcrypt.compare(String(providedCode).trim(), storedHash);
     if (!matches) {
-      // optional attempts counter
       user.resetAttempts = (user.resetAttempts || 0) + 1;
       await user.save();
       return res.status(400).json({ ok: false, message: "Invalid OTP" });
@@ -83,8 +78,35 @@ export default async function handler(req, res) {
 
     await user.save();
 
-    // sign token so frontend can login immediately
+    // sign token
     const token = signToken(user);
+
+    // --- FIX START: Set HTTP-Only Cookie ---
+    const maxAgeSeconds = (() => {
+        if (!process.env.JWT_EXPIRES_IN) return 7 * 24 * 60 * 60; // Default 7d
+        const v = process.env.JWT_EXPIRES_IN;
+        const m = v.match(/^(\d+)([dhm])$/);
+        if (m) {
+          const amount = Number(m[1]);
+          if (m[2] === "d") return amount * 24 * 60 * 60;
+          if (m[2] === "h") return amount * 60 * 60;
+          if (m[2] === "m") return amount * 60;
+        }
+        const maybeNum = Number(v);
+        if (!isNaN(maybeNum)) return maybeNum;
+        return 7 * 24 * 60 * 60;
+    })();
+
+    const cookieOptions = {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === "production",
+        sameSite: "lax",
+        path: "/",
+        maxAge: maxAgeSeconds
+    };
+
+    res.setHeader("Set-Cookie", cookie.serialize("token", token, cookieOptions));
+    // --- FIX END ---
 
     return res.status(200).json({ ok: true, message: "OTP verified", token });
   } catch (err) {
