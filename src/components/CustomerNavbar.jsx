@@ -14,6 +14,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import CustomerAddressModal from "@/components/CustomerAddressModal";
+import ManualLocationModal from "@/components/ManualLocationModal"; // <--- NEW IMPORT
 
 // Helper to load cart from localStorage
 function loadCart() {
@@ -30,6 +31,7 @@ export default function CustomerNavbar() {
   // --- Address & Modal State ---
   const [isAddressModalOpen, setIsAddressModalOpen] = useState(false);
   const [selectedAddress, setSelectedAddress] = useState(null);
+  const [showManualModal, setShowManualModal] = useState(false); // <--- NEW STATE
 
   // Helper: Update Cart Count
   const updateCartCount = () => {
@@ -60,6 +62,9 @@ export default function CustomerNavbar() {
     // Notify other components (like LocalProducts)
     if (typeof window !== "undefined") {
       window.dispatchEvent(new Event("livemart-location-update"));
+      // --- MODIFIED: Force reload after setting saved location ---
+      window.location.reload(); 
+      // ----------------------------------------------------
     }
   };
 
@@ -97,7 +102,10 @@ export default function CustomerNavbar() {
               location: { coordinates: [parsed.lng, parsed.lat] }
             });
           } else if (data.user?.addresses?.length > 0) {
-            setActiveLocation(data.user.addresses[0]);
+            // Note: setActiveLocation is NOT called here on initial load to avoid infinite reloads
+            // The Home Page's LocalProducts fetches location on its own initial load.
+            // setActiveLocation is only used when the user INTERACTS with the dropdown/modal.
+            setSelectedAddress(data.user.addresses[0]);
           }
         } else {
           setUser(null);
@@ -134,7 +142,15 @@ export default function CustomerNavbar() {
     }
   };
 
-  // --- Handle Address Actions (unchanged) ---
+  // --- NEW HANDLER for Manual Location Set ---
+  const handleManualLocationSet = (locData) => {
+    // locData is already saved to localStorage and reload is handled in ManualLocationModal
+    // We just close the modal here.
+    setShowManualModal(false);
+  };
+  // ----------------------------------------
+  
+  // --- Handle Address Actions (unchanged for logged-in) ---
   const handleAddressSelect = (address) => {
     setActiveLocation(address);
     setIsAddressModalOpen(false);
@@ -149,8 +165,10 @@ export default function CustomerNavbar() {
 
   const handleDeliverToClick = () => {
     if (!user) {
-      router.push("/login");
+      // MODIFIED: Open manual location modal for guests
+      setShowManualModal(true);
     } else {
+      // Logged in users still open the Customer Address modal for saved addresses
       setIsAddressModalOpen(true);
     }
   };
@@ -169,7 +187,7 @@ export default function CustomerNavbar() {
             LiveMart
           </Link>
 
-          {/* 2. Nav Links */}
+          {/* 2. Nav Links (unchanged) */}
           <div className="hidden md:flex items-center gap-6 text-base font-medium text-black/80">
             <div className="relative group h-full flex items-center">
               <span className="cursor-pointer hover:text-black transition-colors py-2">Shop</span>
@@ -199,13 +217,13 @@ export default function CustomerNavbar() {
             <Link href="/products?sort=newest" className="hover:text-black transition-colors">New Arrivals</Link>
           </div>
 
-          {/* 3. Search Bar */}
+          {/* 3. Search Bar (unchanged) */}
           <div className="flex-1 relative hidden md:block">
             <Search className="absolute left-4 top-1/2 -translate-y-1/2 h-5 w-5 text-gray-400" />
             <Input className="w-full bg-[#F0F0F0] border-none rounded-full pl-12 h-11 text-base focus-visible:ring-1 focus-visible:ring-gray-300 placeholder:text-gray-400" placeholder="Search for products..." />
           </div>
 
-          {/* --- DELIVER TO BUTTON (unchanged) --- */}
+          {/* --- DELIVER TO BUTTON (modified onClick) --- */}
           <Button 
             variant="ghost" 
             className="hidden lg:flex items-center gap-2 px-2 hover:bg-gray-100 rounded-lg h-11"
@@ -222,7 +240,7 @@ export default function CustomerNavbar() {
             </div>
           </Button>
 
-          {/* 4. Icons & Profile Dropdown */}
+          {/* 4. Icons & Profile Dropdown (unchanged) */}
           <div className="flex items-center gap-4">
             <Link href="/cart">
               <Button variant="ghost" size="icon" className="relative hover:bg-gray-100 rounded-full w-10 h-10">
@@ -285,7 +303,7 @@ export default function CustomerNavbar() {
         </div>
       </nav>
 
-      {/* --- Address Modal (unchanged) --- */}
+      {/* --- Address Modal (for logged-in users) --- */}
       {user && (
         <CustomerAddressModal 
           isOpen={isAddressModalOpen} 
@@ -295,6 +313,13 @@ export default function CustomerNavbar() {
           onAddressAdded={handleAddressAdded}
         />
       )}
+      
+      {/* --- NEW: Manual Location Modal (for guest users) --- */}
+      <ManualLocationModal 
+        isOpen={showManualModal} 
+        onClose={() => setShowManualModal(false)}
+        onLocationSet={handleManualLocationSet}
+      />
     </>
   );
 }

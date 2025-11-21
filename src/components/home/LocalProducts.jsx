@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react";
 import Link from "next/link";
 import ProductCard from "@/components/ProductCard";
 import CustomerAddressModal from "@/components/CustomerAddressModal";
+import ManualLocationModal from "@/components/ManualLocationModal"; // <--- NEW IMPORT
 import { Button } from "@/components/ui/button";
 import { Loader2, MapPinOff, Info, RefreshCw, MapPin } from "lucide-react";
 import {
@@ -25,10 +26,13 @@ export default function LocalProducts() {
   // Location State
   const [coords, setCoords] = useState(null); // { lat, lng }
   const [locationLabel, setLocationLabel] = useState("Your Location");
-  const [showAddressModal, setShowAddressModal] = useState(false);
+  
+  // Modal States
+  const [showAddressModal, setShowAddressModal] = useState(false); // For Logged-in Users
+  const [showManualModal, setShowManualModal] = useState(false); // <--- NEW: For Guests/No Products
 
-  // --- CORE FETCH LOGIC ---
-  const fetchLocalProducts = async (lat, lng) => {
+  // --- CORE FETCH LOGIC (Moved to useCallback for stable reference) ---
+  const fetchLocalProducts = React.useCallback(async (lat, lng) => {
     setLoading(true);
     try {
       const res = await fetch(`/api/products?lat=${lat}&lng=${lng}&radius=50&limit=4`);
@@ -39,10 +43,22 @@ export default function LocalProducts() {
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
+
+  // Helper function to update state and trigger fetch
+  const updateLocationAndFetch = React.useCallback((lat, lng, city, pincode) => {
+    setCoords({ lat, lng });
+    setLocationLabel(`${city} ${pincode || ''}`);
+    fetchLocalProducts(lat, lng);
+    
+    // Dispatch event so Navbar updates immediately
+    if (typeof window !== 'undefined') {
+        window.dispatchEvent(new Event("livemart-location-update"));
+    }
+  }, [fetchLocalProducts]);
 
   // --- LOCATION INITIALIZATION ---
-  const initLocation = async () => {
+  const initLocation = React.useCallback(async () => {
     setLoading(true);
 
     // 1. Check LocalStorage FIRST (Source of truth from Navbar)
@@ -50,9 +66,10 @@ export default function LocalProducts() {
     if (savedLoc) {
       try {
         const { lat, lng, city, pincode } = JSON.parse(savedLoc);
-        setCoords({ lat, lng });
-        setLocationLabel(`${city} ${pincode || ''}`);
-        fetchLocalProducts(lat, lng);
+        // Only trigger fetch if coordinates are valid
+        if (lat && lng) {
+          updateLocationAndFetch(lat, lng, city, pincode);
+        }
         
         // Also fetch user if needed just to have the object
         const res = await fetch("/api/auth/me", { credentials: "include" });
@@ -74,13 +91,12 @@ export default function LocalProducts() {
         if (data.user && data.user.role === "CUSTOMER") {
           setUser(data.user);
           
-          // If user has addresses, default to the first one AND SAVE IT
           if (data.user.addresses && data.user.addresses.length > 0) {
              const def = data.user.addresses[0];
              if(def.location?.coordinates) {
                 const [lng, lat] = def.location.coordinates;
                 
-                // Save to storage so Navbar and Refresh syncs
+                // Save to storage
                 const locData = {
                   city: def.city,
                   pincode: def.pincode,
@@ -89,14 +105,7 @@ export default function LocalProducts() {
                 };
                 localStorage.setItem("livemart_active_location", JSON.stringify(locData));
                 
-                setCoords({ lat, lng });
-                setLocationLabel(`${def.city} ${def.pincode}`);
-                fetchLocalProducts(lat, lng);
-                
-                // Dispatch event so Navbar updates immediately
-                if (typeof window !== 'undefined') {
-                    window.dispatchEvent(new Event("livemart-location-update"));
-                }
+                updateLocationAndFetch(lat, lng, def.city, def.pincode);
                 return;
              }
           } else {
@@ -113,7 +122,7 @@ export default function LocalProducts() {
 
     // 3. Fallback: Browser Geolocation (Guest)
     requestBrowserLocation();
-  };
+  }, [updateLocationAndFetch]);
 
   const requestBrowserLocation = () => {
     if (!navigator.geolocation) {
@@ -129,14 +138,8 @@ export default function LocalProducts() {
         const locData = { lat: latitude, lng: longitude, city: "Current", pincode: "Location" };
         localStorage.setItem("livemart_active_location", JSON.stringify(locData));
         
-        setCoords({ lat: latitude, lng: longitude });
-        setLocationLabel("Current Location");
-        fetchLocalProducts(latitude, longitude);
+        updateLocationAndFetch(latitude, longitude, "Current", "Location");
         setPermissionDenied(false);
-        
-        if (typeof window !== 'undefined') {
-            window.dispatchEvent(new Event("livemart-location-update"));
-        }
       },
       (error) => {
         console.warn("Location access denied:", error);
@@ -154,25 +157,41 @@ export default function LocalProducts() {
     const handleLocationUpdate = () => {
       const savedLoc = localStorage.getItem("livemart_active_location");
       if (savedLoc) {
-        const { lat, lng, city, pincode } = JSON.parse(savedLoc);
-        setCoords({ lat, lng });
-        setLocationLabel(`${city} ${pincode || ''}`);
-        fetchLocalProducts(lat, lng);
+        try {
+          const { lat, lng, city, pincode } = JSON.parse(savedLoc);
+          if (lat && lng) {
+            updateLocationAndFetch(lat, lng, city, pincode);
+          }
+        } catch(e) {
+          console.error("Failed to parse location update", e);
+        }
       }
     };
 
     window.addEventListener("livemart-location-update", handleLocationUpdate);
     return () => window.removeEventListener("livemart-location-update", handleLocationUpdate);
-  }, []);
+  }, [initLocation, updateLocationAndFetch]);
 
   // Handlers for Modal interaction
   const handleAddressSelect = (address) => {
     setShowAddressModal(false);
+    // AddressModal already calls the global location set event upon selection
   };
 
   const handleAddressAdded = (updatedUser) => {
     setUser(updatedUser);
+    // CustomerAddressModal handles setting the new address to localStorage and dispatching update
   };
+  
+  // --- NEW HANDLER ---
+  const handleManualLocationSet = (locData) => {
+    // locData is already saved to localStorage inside the modal component
+    setShowManualModal(false);
+    // The modal also dispatched the 'livemart-location-update' event,
+    // which our useEffect listener catches, automatically calling 
+    // updateLocationAndFetch and refreshing the products.
+  };
+  // -------------------
 
   // --- RENDER ---
 
@@ -206,10 +225,19 @@ export default function LocalProducts() {
             >
               Allow Location
             </Button>
+            
+            {/* NEW: Manual Location button for guests */}
+            <Button 
+              onClick={() => setShowManualModal(true)}
+              variant="link"
+            >
+              Or set location manually
+            </Button>
+            
           </div>
         </div>
 
-        {/* --- PERMISSION HELP MODAL --- */}
+        {/* --- PERMISSION HELP MODAL --- (UNCHANGED) */}
         <Dialog open={showPermissionHelp} onOpenChange={setShowPermissionHelp}>
           <DialogContent className="sm:max-w-[450px]">
             <DialogHeader>
@@ -250,6 +278,14 @@ export default function LocalProducts() {
             </DialogFooter>
           </DialogContent>
         </Dialog>
+        
+        {/* --- MANUAL LOCATION MODAL --- (For guest setting) */}
+        <ManualLocationModal 
+            isOpen={showManualModal} 
+            onClose={() => setShowManualModal(false)}
+            onLocationSet={handleManualLocationSet}
+        />
+        
       </section>
     );
   }
@@ -271,7 +307,7 @@ export default function LocalProducts() {
             )}
         </div>
 
-        {/* Address Modal for Logged In Users */}
+        {/* Address Modal for Logged In Users (unchanged) */}
         {user && (
           <CustomerAddressModal 
             isOpen={showAddressModal} 
@@ -281,6 +317,14 @@ export default function LocalProducts() {
             onAddressAdded={handleAddressAdded}
           />
         )}
+        
+        {/* Manual Location Modal (For when results are empty) */}
+        <ManualLocationModal 
+            isOpen={showManualModal} 
+            onClose={() => setShowManualModal(false)}
+            onLocationSet={handleManualLocationSet}
+        />
+
 
         {/* Products Grid */}
         {products.length > 0 ? (
@@ -301,8 +345,18 @@ export default function LocalProducts() {
         ) : (
             <div className="text-center py-20 text-gray-500 bg-gray-50 rounded-xl">
                 <p>No products found in this area.</p>
-                {/* Show retry button for guests if they want to force refresh location */}
-                {!user && <Button variant="link" onClick={() => { localStorage.removeItem("livemart_active_location"); window.location.reload(); }}>Change Location</Button>}
+                {/* Check if coords are set, if not, location is probably denied/missing */}
+                {coords ? (
+                    // NEW: Button to open Manual Modal
+                    <Button variant="link" onClick={() => setShowManualModal(true)}>
+                        Try a different location
+                    </Button>
+                ) : (
+                    // Fallback button for when location access is denied or initializing
+                    <Button variant="link" onClick={() => setShowPermissionHelp(true)}>
+                        Need help setting location?
+                    </Button>
+                )}
             </div>
         )}
 

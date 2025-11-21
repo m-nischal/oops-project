@@ -1,5 +1,6 @@
+// src/components/CustomerAddressModal.jsx
 import React, { useState, useMemo, useEffect, useRef, useCallback } from "react";
-import { MapPin, Check, Plus, Loader2, Save, LocateFixed, ArrowLeft, Info, RefreshCw } from "lucide-react";
+import { MapPin, Check, Plus, Loader2, Save, LocateFixed, ArrowLeft, Info, RefreshCw, Search } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -33,7 +34,7 @@ const COUNTRY_DATA = [
 ].sort((a, b) => a.country.localeCompare(b.country));
 
 export default function CustomerAddressModal({ isOpen, onClose, addresses, onSelect, onAddressAdded }) {
-  const [mode, setMode] = useState("select"); // 'select' or 'add'
+  const [mode, setMode] = useState("select"); // 'select', 'add', or 'check'
   const [selectedId, setSelectedId] = useState(null);
 
   const { isLoaded } = useLoadScript({
@@ -41,11 +42,35 @@ export default function CustomerAddressModal({ isOpen, onClose, addresses, onSel
     libraries: libraries,
   });
 
+  // Handler for temporary location set (from 'check' mode)
+  const handleApplyCheckedAddress = (locationData) => {
+    // 1. Format and save to local storage
+    const locDataForStorage = {
+      lat: locationData.lat, 
+      lng: locationData.lng, 
+      city: locationData.city, 
+      pincode: locationData.pincode,
+      addressLine1: locationData.address // Store the selected address line 
+    };
+    localStorage.setItem("livemart_active_location", JSON.stringify(locDataForStorage));
+
+    // 2. Dispatch event to notify all listening components (like LocalProducts)
+    if (typeof window !== "undefined") {
+        window.dispatchEvent(new Event("livemart-location-update"));
+        
+        // --- FIX: Force a page reload to guarantee the UI is updated ---
+        window.location.reload(); 
+    }
+    
+    // 3. Close the modal
+    onClose();
+  };
+
   // Handle selecting an existing address
   const handleConfirmSelection = () => {
     if (selectedId) {
       const addr = addresses.find((a) => a._id === selectedId);
-      onSelect(addr);
+      onSelect(addr); // This calls setActiveLocation in Navbar, which now reloads
     }
   };
 
@@ -80,7 +105,7 @@ export default function CustomerAddressModal({ isOpen, onClose, addresses, onSel
         // 5. Auto-select the new address (it will be the last one)
         const newlyCreated = updatedUser.addresses[updatedUser.addresses.length - 1];
         if (newlyCreated) {
-            onSelect(newlyCreated);
+            onSelect(newlyCreated); // This calls setActiveLocation in Navbar, which now reloads
         }
         // 6. Reset mode
         setMode("select");
@@ -96,19 +121,24 @@ export default function CustomerAddressModal({ isOpen, onClose, addresses, onSel
       <DialogContent className="sm:max-w-[600px] max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="text-2xl font-bold text-center">
-            {mode === "select" ? "Select Your Location" : "Add New Address"}
+            {mode === "select" ? "Select Your Location" : 
+             mode === "add" ? "Add New Address" :
+             "Check Another Location" // <--- NEW TITLE
+            }
           </DialogTitle>
           <DialogDescription className="text-center">
             {mode === "select" 
               ? "Choose a delivery location to see products available in your area." 
-              : "Enter your address details below."}
+              : mode === "add" ? "Enter your address details below." :
+              "Search or pin a temporary location." // <--- NEW DESCRIPTION
+            }
           </DialogDescription>
         </DialogHeader>
 
         {mode === "select" ? (
           <div className="space-y-4">
             {/* LIST VIEW */}
-            <div className="grid gap-3 py-2 max-h-[300px] overflow-y-auto">
+            <div className="grid gap-3 py-2 max-h-[250px] overflow-y-auto">
               {addresses.length === 0 && (
                 <div className="text-center text-muted-foreground py-4">
                   No addresses found. Please add one.
@@ -152,17 +182,27 @@ export default function CustomerAddressModal({ isOpen, onClose, addresses, onSel
               >
                 <Plus className="mr-2 h-4 w-4" /> Add New Address
               </Button>
+              
+              {/* --- NEW BUTTON: Switch to Check Mode --- */}
+              <Button
+                variant="secondary"
+                onClick={() => setMode("check")}
+                className="w-full py-6 border-2 border-dashed text-black hover:bg-gray-200"
+              >
+                <Search className="mr-2 h-4 w-4" /> Check Another Location
+              </Button>
+              {/* -------------------------------------- */}
 
               <Button
                 onClick={handleConfirmSelection}
                 disabled={!selectedId}
                 className="w-full rounded-full py-6 text-lg bg-black text-white hover:bg-black/80"
               >
-                Confirm Location
+                Confirm Delivery Address
               </Button>
             </div>
           </div>
-        ) : (
+        ) : mode === "add" ? (
           <div className="space-y-4">
             {/* ADD ADDRESS FORM */}
             {isLoaded ? (
@@ -176,13 +216,208 @@ export default function CustomerAddressModal({ isOpen, onClose, addresses, onSel
               </div>
             )}
           </div>
+        ) : ( // mode === "check"
+          <div className="space-y-4">
+            {/* CHECK ADDRESS FORM */}
+            {isLoaded ? (
+              <CheckAddressForm 
+                onApply={handleApplyCheckedAddress} 
+                onCancel={() => setMode("select")} 
+              />
+            ) : (
+              <div className="py-10 flex justify-center">
+                <Loader2 className="animate-spin h-8 w-8 text-gray-400" />
+              </div>
+            )}
+          </div>
         )}
+        
       </DialogContent>
     </Dialog>
   );
 }
 
-// --- SUB-COMPONENT: Address Form (Logic from Profile Page) ---
+// --- SUB-COMPONENT: CheckAddressForm (Sets temporary location) ---
+function CheckAddressForm({ onApply, onCancel }) {
+  const defaultCenter = useMemo(() => ({ lat: 20.5937, lng: 78.9629 }), []); 
+
+  const [mapCenter, setMapCenter] = useState(defaultCenter);
+  const [markerPosition, setMarkerPosition] = useState(defaultCenter);
+  const [isLocating, setIsLocating] = useState(false);
+  const [addressLabel, setAddressLabel] = useState("Drag pin or search to set location");
+  const mapRef = useRef(null);
+  const addressSearchSetValueRef = useRef(null);
+
+  useEffect(() => {
+    // Try to load initial location from localStorage if available
+    const savedLoc = localStorage.getItem("livemart_active_location");
+    if (savedLoc) {
+      try {
+        const { lat, lng, city, pincode } = JSON.parse(savedLoc);
+        const initialPos = { lat: Number(lat), lng: Number(lng) };
+        setMapCenter(initialPos);
+        setMarkerPosition(initialPos);
+        setAddressLabel(`${city} ${pincode}`);
+      } catch (e) {
+        setMapCenter(defaultCenter);
+        setMarkerPosition(defaultCenter);
+      }
+    }
+  }, [defaultCenter]);
+
+
+  const updateLocationAndAddress = useCallback(async (lat, lng) => {
+    const latLng = { lat, lng };
+    setMarkerPosition(latLng);
+    setMapCenter(latLng);
+
+    try {
+      const results = await getGeocode({ location: latLng });
+      const addressDescription = results[0]?.formatted_address || "Pinned Location";
+      const components = results[0]?.address_components || [];
+      
+      let city = 'Pinned Location';
+      let pincode = '';
+      for (const component of components) {
+        if (component.types.includes('locality')) city = component.long_name;
+        if (component.types.includes('postal_code')) pincode = component.long_name;
+      }
+      
+      setAddressLabel(`${city} ${pincode}`);
+      
+      // Update the search bar text
+      if (addressSearchSetValueRef.current) {
+        addressSearchSetValueRef.current(addressDescription, false);
+      }
+      
+      // Return data for the apply handler
+      return { address: addressDescription, lat, lng, city, pincode };
+      
+    } catch (error) {
+      console.error("Reverse Geocode failed:", error);
+      setAddressLabel("Coordinates set (could not resolve address)");
+      return { address: "Pinned Location", lat, lng, city: "Custom", pincode: "" };
+    }
+  }, []);
+  
+  const handleMapClick = useCallback((e) => {
+    updateLocationAndAddress(e.latLng.lat(), e.latLng.lng());
+  }, [updateLocationAndAddress]);
+
+  const handleMarkerDragEnd = useCallback((e) => {
+    updateLocationAndAddress(e.latLng.lat(), e.latLng.lng());
+  }, [updateLocationAndAddress]);
+
+  // --- FIX: Correctly call updateLocationAndAddress from AddressAutocomplete ---
+  const handlePlaceSelect = useCallback(async (addressDescription, { lat, lng }) => {
+    // Call the core function to update marker position, map center, and reverse geocodes for the label
+    await updateLocationAndAddress(lat, lng); 
+    if (mapRef.current) {
+        mapRef.current.panTo({ lat, lng });
+    }
+  }, [updateLocationAndAddress]);
+
+  const locateUser = useCallback(() => {
+    if (!navigator.geolocation) return;
+    setIsLocating(true);
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        const { latitude, longitude } = position.coords;
+        updateLocationAndAddress(latitude, longitude).then((locData) => {
+          setMarkerPosition({ lat: locData.lat, lng: locData.lng });
+          setMapCenter({ lat: locData.lat, lng: locData.lng });
+        });
+        setIsLocating(false);
+      },
+      (error) => {
+        console.warn("Geolocation failed:", error);
+        setIsLocating(false);
+        alert("Could not get current location. Please search manually.");
+      },
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+    );
+  }, [updateLocationAndAddress]);
+
+  const handleApplyLocation = async () => {
+    if (!markerPosition) {
+      alert("Please set a location by searching or clicking the map.");
+      return;
+    }
+    
+    // Reverse geocode again to ensure the freshest location data is fetched
+    const finalLocationData = await updateLocationAndAddress(markerPosition.lat, markerPosition.lng);
+
+    // Call the application handler (which saves to local storage and dispatches event)
+    onApply(finalLocationData);
+  };
+
+  return (
+    <div className="grid gap-4 py-2">
+      <Button type="button" variant="ghost" size="sm" onClick={onCancel} className="p-0 h-auto hover:bg-transparent justify-start">
+        <ArrowLeft className="h-4 w-4 mr-2"/> Back to Addresses
+      </Button>
+
+      <div className="relative">
+        <AddressAutocomplete 
+            onSelect={handlePlaceSelect}
+            setExternalValueRef={addressSearchSetValueRef}
+        />
+      </div>
+
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        onClick={locateUser}
+        disabled={isLocating}
+        className="flex items-center justify-center w-full"
+      >
+        {isLocating ? (
+          <Loader2 className="animate-spin h-4 w-4 mr-2" />
+        ) : (
+          <LocateFixed className="h-4 w-4 mr-2" />
+        )}
+        {isLocating ? "Locating you..." : "Use Current Browser Location"}
+      </Button>
+
+      <div className="h-[250px] w-full rounded-md overflow-hidden border relative">
+        <GoogleMap
+          zoom={markerPosition ? 15 : 5}
+          center={mapCenter}
+          mapContainerClassName="w-full h-full"
+          onClick={handleMapClick}
+          onLoad={(map) => (mapRef.current = map)}
+        >
+          {markerPosition && (
+            <Marker
+              position={markerPosition}
+              draggable={true}
+              onDragEnd={handleMarkerDragEnd}
+            />
+          )}
+        </GoogleMap>
+      </div>
+      
+      <div className="flex items-center text-sm font-medium">
+         <MapPin className="h-4 w-4 mr-2 text-primary" />
+         Location Set: <span className="ml-1 text-black truncate">{addressLabel}</span>
+      </div>
+
+      <DialogFooter className="mt-4 flex-col gap-2 pt-4">
+        <Button 
+          onClick={handleApplyLocation} 
+          disabled={!markerPosition || isLocating}
+          className="w-full"
+        >
+          <Save className="mr-2 h-4 w-4" /> Apply & Search
+        </Button>
+      </DialogFooter>
+    </div>
+  );
+}
+
+
+// --- SUB-COMPONENT: AddressForm (Logic from Profile Page - Remains the same) ---
 function AddressForm({ onSave, onCancel }) {
   const defaultCenter = useMemo(() => ({ lat: 20.5937, lng: 78.9629 }), []); // India Center
   
@@ -204,8 +439,6 @@ function AddressForm({ onSave, onCancel }) {
   const [mapCenter, setMapCenter] = useState(defaultCenter);
   const [markerPosition, setMarkerPosition] = useState(null);
   const [isLocating, setIsLocating] = useState(false);
-  
-  // Permission Help State
   const [showPermissionHelp, setShowPermissionHelp] = useState(false);
   
   const mapRef = useRef(null);
@@ -245,6 +478,8 @@ function AddressForm({ onSave, onCancel }) {
         if (component.types.includes('postal_code')) newAddr.pincode = component.long_name;
       }
 
+      if (!newAddr.addressLine1) newAddr.addressLine1 = addressDescription.split(',')[0].trim();
+
       const phoneCodeObj = countryCodeFound ? COUNTRY_DATA.find(c => c.iso2 === countryCodeFound) : null;
 
       setAddress(prev => ({
@@ -274,7 +509,6 @@ function AddressForm({ onSave, onCancel }) {
       (error) => {
         console.warn("Location access denied:", error);
         setIsLocating(false);
-        // Trigger Permission Help Dialog when access is denied
         setShowPermissionHelp(true);
       }
     );
@@ -295,6 +529,19 @@ function AddressForm({ onSave, onCancel }) {
   const handleChange = (field, value) => {
     setAddress(prev => ({ ...prev, [field]: value }));
   };
+  
+  const handleMapClick = useCallback((e) => {
+    updateLocationAndAddress(e.latLng.lat(), e.latLng.lng());
+  }, [updateLocationAndAddress]);
+
+  const handleMarkerDragEnd = useCallback((e) => {
+    updateLocationAndAddress(e.latLng.lat(), e.latLng.lng());
+  }, [updateLocationAndAddress]);
+  
+  const handlePlaceSelect = useCallback((addressDescription, latLng) => {
+    updateLocationAndAddress(latLng.lat, latLng.lng);
+  }, [updateLocationAndAddress]);
+
 
   return (
     <>
@@ -324,7 +571,7 @@ function AddressForm({ onSave, onCancel }) {
         <div className="space-y-2">
           <Label>Search Address</Label>
           <AddressAutocomplete 
-            onSelect={(desc, { lat, lng }) => updateLocationAndAddress(lat, lng)}
+            onSelect={handlePlaceSelect}
             setExternalValueRef={addressSearchSetValueRef}
           />
           <Button type="button" variant="outline" size="sm" onClick={locateUser} disabled={isLocating} className="w-full mt-1">
@@ -337,10 +584,10 @@ function AddressForm({ onSave, onCancel }) {
               zoom={markerPosition ? 15 : 5}
               center={mapCenter}
               mapContainerClassName="w-full h-full"
-              onClick={(e) => updateLocationAndAddress(e.latLng.lat(), e.latLng.lng())}
+              onClick={handleMapClick}
               onLoad={(map) => (mapRef.current = map)}
             >
-              {markerPosition && <Marker position={markerPosition} draggable onDragEnd={(e) => updateLocationAndAddress(e.latLng.lat(), e.latLng.lng())} />}
+              {markerPosition && <Marker position={markerPosition} draggable onDragEnd={handleMarkerDragEnd} />}
             </GoogleMap>
           </div>
         </div>
