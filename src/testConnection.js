@@ -1,13 +1,14 @@
 // testConnection.js
 import mongoose from "mongoose";
 import dotenv from "dotenv";
-import Product from "./src/models/Product.js";
+// FIX: Removed "src/" because we are already inside the src folder
+import Product from "./models/Product.js"; 
 
 dotenv.config(); // loads .env by default
 
 /**
  * Quick local connection + CRUD test. Useful to verify MONGO_URI in .env.
- * Example: node testConnection.js
+ * Example: node src/testConnection.js
  */
 async function test() {
   try {

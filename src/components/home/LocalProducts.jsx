@@ -1,10 +1,10 @@
-// src/components/home/LocalProducts.jsx
 import React, { useEffect, useState } from "react";
 import Link from "next/link";
 import ProductCard from "@/components/ProductCard";
 import CustomerAddressModal from "@/components/CustomerAddressModal";
+import ManualLocationModal from "@/components/ManualLocationModal"; // <--- NEW IMPORT
 import { Button } from "@/components/ui/button";
-import { Loader2, MapPinOff, Info, RefreshCw } from "lucide-react";
+import { Loader2, MapPinOff, Info, RefreshCw, MapPin } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -25,64 +25,105 @@ export default function LocalProducts() {
   
   // Location State
   const [coords, setCoords] = useState(null); // { lat, lng }
-  const [showAddressModal, setShowAddressModal] = useState(false);
+  const [locationLabel, setLocationLabel] = useState("Your Location");
+  
+  // Modal States
+  const [showAddressModal, setShowAddressModal] = useState(false); // For Logged-in Users
+  const [showManualModal, setShowManualModal] = useState(false); // <--- NEW: For Guests/No Products
 
-  // 1. Check User & Location on Mount
-  useEffect(() => {
-    async function init() {
-      setLoading(true);
-      try {
-        // A. Check if logged in
-        const res = await fetch("/api/auth/me", { credentials: "include" });
-        
-        if (res.ok) {
-          const data = await res.json();
-          if (data.user && data.user.role === "CUSTOMER") {
-            setUser(data.user);
-            
-            // Check Session Storage to see if we already asked this session
-            const hasSeenPrompt = sessionStorage.getItem("location_prompt_shown");
-            
-            if (!hasSeenPrompt) {
-              // If not seen, show modal
-              setShowAddressModal(true);
-            } else {
-              // If seen, try to use the last selected address from session or default to first address
-              // For simplicity, we'll just pick the first address if it exists to load data immediately
-              if (data.user.addresses && data.user.addresses.length > 0) {
-                 const def = data.user.addresses[0];
-                 if(def.location?.coordinates) {
-                    const [lng, lat] = def.location.coordinates;
-                    setCoords({ lat, lng });
-                    fetchLocalProducts(lat, lng);
-                 }
-              }
-            }
-            setLoading(false);
-            return; 
-          }
-        }
-        
-        // B. If Guest: Check Local Storage first
-        const savedLocation = localStorage.getItem("guest_location");
-        if (savedLocation) {
-          const { lat, lng } = JSON.parse(savedLocation);
-          setCoords({ lat, lng });
-          fetchLocalProducts(lat, lng);
-        } else {
-          // C. If no saved location, ask browser
-          requestBrowserLocation();
-        }
-
-      } catch (e) {
-        // Fallback to guest flow
-        requestBrowserLocation();
-      }
+  // --- CORE FETCH LOGIC (Moved to useCallback for stable reference) ---
+  const fetchLocalProducts = React.useCallback(async (lat, lng) => {
+    setLoading(true);
+    try {
+      const res = await fetch(`/api/products?lat=${lat}&lng=${lng}&radius=50&limit=4`);
+      const data = await res.json();
+      setProducts(data.items || []);
+    } catch (error) {
+      console.error("Failed to fetch local products", error);
+    } finally {
+      setLoading(false);
     }
-    init();
   }, []);
 
-  // 2. Helper: Request Browser Location (Guest Flow)
+  // Helper function to update state and trigger fetch
+  const updateLocationAndFetch = React.useCallback((lat, lng, city, pincode) => {
+    setCoords({ lat, lng });
+    setLocationLabel(`${city} ${pincode || ''}`);
+    fetchLocalProducts(lat, lng);
+    
+    // Dispatch event so Navbar updates immediately
+    if (typeof window !== 'undefined') {
+        window.dispatchEvent(new Event("livemart-location-update"));
+    }
+  }, [fetchLocalProducts]);
+
+  // --- LOCATION INITIALIZATION ---
+  const initLocation = React.useCallback(async () => {
+    setLoading(true);
+
+    // 1. Check LocalStorage FIRST (Source of truth from Navbar)
+    const savedLoc = localStorage.getItem("livemart_active_location");
+    if (savedLoc) {
+      try {
+        const { lat, lng, city, pincode } = JSON.parse(savedLoc);
+        // Only trigger fetch if coordinates are valid
+        if (lat && lng) {
+          updateLocationAndFetch(lat, lng, city, pincode);
+        }
+        
+        // Also fetch user if needed just to have the object
+        const res = await fetch("/api/auth/me", { credentials: "include" });
+        if (res.ok) {
+           const data = await res.json();
+           setUser(data.user);
+        }
+        return;
+      } catch (e) {
+        console.error("Error parsing saved location", e);
+      }
+    }
+
+    // 2. If No Storage, Check User Profile
+    try {
+      const res = await fetch("/api/auth/me", { credentials: "include" });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.user && data.user.role === "CUSTOMER") {
+          setUser(data.user);
+          
+          if (data.user.addresses && data.user.addresses.length > 0) {
+             const def = data.user.addresses[0];
+             if(def.location?.coordinates) {
+                const [lng, lat] = def.location.coordinates;
+                
+                // Save to storage
+                const locData = {
+                  city: def.city,
+                  pincode: def.pincode,
+                  addressLine1: def.addressLine1,
+                  lat, lng
+                };
+                localStorage.setItem("livemart_active_location", JSON.stringify(locData));
+                
+                updateLocationAndFetch(lat, lng, def.city, def.pincode);
+                return;
+             }
+          } else {
+            // Logged in but no address? Ask to add one.
+            setShowAddressModal(true);
+            setLoading(false);
+            return;
+          }
+        }
+      }
+    } catch (e) {
+      // Not logged in or error
+    }
+
+    // 3. Fallback: Browser Geolocation (Guest)
+    requestBrowserLocation();
+  }, [updateLocationAndFetch]);
+
   const requestBrowserLocation = () => {
     if (!navigator.geolocation) {
       setPermissionDenied(true);
@@ -94,14 +135,10 @@ export default function LocalProducts() {
       (position) => {
         const { latitude, longitude } = position.coords;
         
-        // Save to State
-        setCoords({ lat: latitude, lng: longitude });
+        const locData = { lat: latitude, lng: longitude, city: "Current", pincode: "Location" };
+        localStorage.setItem("livemart_active_location", JSON.stringify(locData));
         
-        // Save to Local Storage (Persist for future visits)
-        localStorage.setItem("guest_location", JSON.stringify({ lat: latitude, lng: longitude }));
-        
-        // Fetch Data
-        fetchLocalProducts(latitude, longitude);
+        updateLocationAndFetch(latitude, longitude, "Current", "Location");
         setPermissionDenied(false);
       },
       (error) => {
@@ -112,40 +149,51 @@ export default function LocalProducts() {
     );
   };
 
-  // 3. Fetch Products Logic
-  const fetchLocalProducts = async (lat, lng) => {
-    setLoading(true);
-    try {
-      const res = await fetch(`/api/products?lat=${lat}&lng=${lng}&radius=50&limit=4`);
-      const data = await res.json();
-      setProducts(data.items || []);
-    } catch (error) {
-      console.error("Failed to fetch local products", error);
-    } finally {
-      setLoading(false);
-    }
-  };
+  // --- EFFECT: Initial Load + Event Listener ---
+  useEffect(() => {
+    initLocation();
 
-  // 4. Handle Address Selection (Customer Flow)
+    // Listen for updates from Navbar
+    const handleLocationUpdate = () => {
+      const savedLoc = localStorage.getItem("livemart_active_location");
+      if (savedLoc) {
+        try {
+          const { lat, lng, city, pincode } = JSON.parse(savedLoc);
+          if (lat && lng) {
+            updateLocationAndFetch(lat, lng, city, pincode);
+          }
+        } catch(e) {
+          console.error("Failed to parse location update", e);
+        }
+      }
+    };
+
+    window.addEventListener("livemart-location-update", handleLocationUpdate);
+    return () => window.removeEventListener("livemart-location-update", handleLocationUpdate);
+  }, [initLocation, updateLocationAndFetch]);
+
+  // Handlers for Modal interaction
   const handleAddressSelect = (address) => {
-    if (address && address.location && address.location.coordinates) {
-      const [lng, lat] = address.location.coordinates;
-      setCoords({ lat, lng });
-      fetchLocalProducts(lat, lng);
-      
-      // Close modal and Mark as seen in Session Storage
-      setShowAddressModal(false);
-      sessionStorage.setItem("location_prompt_shown", "true");
-    } else {
-      alert("Selected address does not have valid coordinates.");
-    }
+    setShowAddressModal(false);
+    // AddressModal already calls the global location set event upon selection
   };
 
   const handleAddressAdded = (updatedUser) => {
     setUser(updatedUser);
+    // CustomerAddressModal handles setting the new address to localStorage and dispatching update
   };
+  
+  // --- NEW HANDLER ---
+  const handleManualLocationSet = (locData) => {
+    // locData is already saved to localStorage inside the modal component
+    setShowManualModal(false);
+    // The modal also dispatched the 'livemart-location-update' event,
+    // which our useEffect listener catches, automatically calling 
+    // updateLocationAndFetch and refreshing the products.
+  };
+  // -------------------
 
-  // --- RENDER HELPERS ---
+  // --- RENDER ---
 
   if (loading && !showAddressModal) {
     return (
@@ -156,7 +204,7 @@ export default function LocalProducts() {
   }
 
   // GUEST: Permission Denied State
-  if (permissionDenied && !user) {
+  if (permissionDenied && !user && !coords) {
     return (
       <section className="w-full py-16 border-b border-gray-100 bg-gray-50">
         <div className="max-w-[1440px] mx-auto px-6 text-center">
@@ -168,7 +216,7 @@ export default function LocalProducts() {
               <MapPinOff className="w-8 h-8 text-gray-500" />
             </div>
             <p className="text-gray-600 max-w-md">
-              We can't show you local products because location access was denied.
+              We need your location to show you nearby products.
             </p>
             
             <Button 
@@ -177,10 +225,19 @@ export default function LocalProducts() {
             >
               Allow Location
             </Button>
+            
+            {/* NEW: Manual Location button for guests */}
+            <Button 
+              onClick={() => setShowManualModal(true)}
+              variant="link"
+            >
+              Or set location manually
+            </Button>
+            
           </div>
         </div>
 
-        {/* --- PERMISSION HELP MODAL --- */}
+        {/* --- PERMISSION HELP MODAL --- (UNCHANGED) */}
         <Dialog open={showPermissionHelp} onOpenChange={setShowPermissionHelp}>
           <DialogContent className="sm:max-w-[450px]">
             <DialogHeader>
@@ -221,87 +278,86 @@ export default function LocalProducts() {
             </DialogFooter>
           </DialogContent>
         </Dialog>
+        
+        {/* --- MANUAL LOCATION MODAL --- (For guest setting) */}
+        <ManualLocationModal 
+            isOpen={showManualModal} 
+            onClose={() => setShowManualModal(false)}
+            onLocationSet={handleManualLocationSet}
+        />
+        
       </section>
     );
-  }
-
-  // If everything is loaded but no products found
-  if (!loading && !showAddressModal && products.length === 0 && coords) {
-     return (
-      <section className="w-full py-16 border-b border-gray-100">
-        <div className="max-w-[1440px] mx-auto px-6">
-          <h2 className="text-3xl md:text-5xl font-black text-center uppercase tracking-tighter mb-10">
-            Local Products
-          </h2>
-          <div className="text-center py-10 text-gray-500">
-            <p>No local products found within 50km of your location.</p>
-            {/* Only show "Change Location" to Guests, Customers use Profile */}
-            {!user && (
-                <Button 
-                variant="link" 
-                onClick={() => {
-                    localStorage.removeItem("guest_location");
-                    window.location.reload();
-                }}
-                className="text-black underline"
-                >
-                Change Location
-                </Button>
-            )}
-          </div>
-        </div>
-        {/* Keep Modal Mounted even if no products found, just in case */}
-        {user && (
-          <CustomerAddressModal 
-            isOpen={showAddressModal} 
-            addresses={user.addresses || []} 
-            onSelect={handleAddressSelect}
-            onAddressAdded={handleAddressAdded}
-          />
-        )}
-      </section>
-     );
   }
 
   return (
     <section className="w-full py-16 border-b border-gray-100">
       <div className="max-w-[1440px] mx-auto px-6">
         
-        <h2 className="text-3xl md:text-5xl font-black text-center uppercase tracking-tighter mb-10 md:mb-14">
-          Local Products
-        </h2>
+        <div className="flex flex-col md:flex-row items-center justify-between mb-10 md:mb-14 gap-4">
+            <h2 className="text-3xl md:text-5xl font-black text-center md:text-left uppercase tracking-tighter">
+            Local Products
+            </h2>
+            
+            {coords && (
+                <div className="flex items-center text-sm text-gray-500 bg-gray-50 px-4 py-2 rounded-full">
+                    <MapPin className="w-4 h-4 mr-2 text-black" />
+                    Showing items near: <strong className="ml-1 text-black">{locationLabel}</strong>
+                </div>
+            )}
+        </div>
 
-        {/* Customer Address Modal */}
+        {/* Address Modal for Logged In Users (unchanged) */}
         {user && (
           <CustomerAddressModal 
             isOpen={showAddressModal} 
+            onClose={() => setShowAddressModal(false)}
             addresses={user.addresses || []} 
             onSelect={handleAddressSelect}
             onAddressAdded={handleAddressAdded}
           />
         )}
+        
+        {/* Manual Location Modal (For when results are empty) */}
+        <ManualLocationModal 
+            isOpen={showManualModal} 
+            onClose={() => setShowManualModal(false)}
+            onLocationSet={handleManualLocationSet}
+        />
 
-        {/* Product Grid */}
-        {products.length > 0 && (
+
+        {/* Products Grid */}
+        {products.length > 0 ? (
           <>
             <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-x-6 gap-y-10">
               {products.map((product) => (
-                <ProductCard 
-                  key={product._id} 
-                  product={product} 
-                  label="LOCAL"
-                />
+                <ProductCard key={product._id} product={product} label="LOCAL" />
               ))}
             </div>
-
             <div className="mt-10 text-center">
               <Link href={`/products?lat=${coords?.lat}&lng=${coords?.lng}&radius=50`}>
                 <Button variant="outline" className="rounded-full px-16 py-6 text-base border-gray-200 hover:bg-gray-50 transition-colors w-full md:w-auto">
-                  View All
+                  View All Local
                 </Button>
               </Link>
             </div>
           </>
+        ) : (
+            <div className="text-center py-20 text-gray-500 bg-gray-50 rounded-xl">
+                <p>No products found in this area.</p>
+                {/* Check if coords are set, if not, location is probably denied/missing */}
+                {coords ? (
+                    // NEW: Button to open Manual Modal
+                    <Button variant="link" onClick={() => setShowManualModal(true)}>
+                        Try a different location
+                    </Button>
+                ) : (
+                    // Fallback button for when location access is denied or initializing
+                    <Button variant="link" onClick={() => setShowPermissionHelp(true)}>
+                        Need help setting location?
+                    </Button>
+                )}
+            </div>
         )}
 
       </div>
