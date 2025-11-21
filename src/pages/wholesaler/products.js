@@ -2,8 +2,8 @@
 import React, { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/router";
-import WholesalerLayout from "../../components/WholesalerLayout"; // We can reuse the same layout
-import { useAuthGuard } from '../../hooks/useAuthGuard';
+import WholesalerLayout from "../../components/WholesalerLayout";
+import { useAuthGuard } from "../../hooks/useAuthGuard";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -32,6 +32,14 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
+import {
+  Pagination,
+  PaginationContent,
+  PaginationItem,
+  PaginationLink,
+  PaginationNext,
+  PaginationPrevious,
+} from "@/components/ui/pagination"; // <--- NEW IMPORTS
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import {
   PlusCircle,
@@ -40,10 +48,8 @@ import {
   Loader2,
 } from "lucide-react";
 
-// Helper to format currency
 const formatPrice = (p) => `₹${Number(p || 0).toLocaleString("en-IN")}`;
 
-// Helper to get total stock
 function totalStockFrom(product = {}) {
   if (Array.isArray(product.sizes)) {
     return product.sizes.reduce((acc, it) => acc + Number(it.stock || 0), 0);
@@ -51,35 +57,42 @@ function totalStockFrom(product = {}) {
   return product.totalStock || 0;
 }
 
+const PRODUCTS_PER_PAGE = 12;
+
 export default function WholesalerProductsPage() {
   const { isLoading: isAuthLoading } = useAuthGuard("WHOLESALER");
+
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+
+  // --- Pagination State ---
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
 
   const router = useRouter();
+  const totalPages = Math.ceil(total / PRODUCTS_PER_PAGE);
 
   const fetchProducts = async () => {
     try {
       setLoading(true);
       setError(null);
 
-      const token = localStorage.getItem("token"); //
+      const token = localStorage.getItem("token");
       if (!token)
         throw new Error("No authorization token found. Please log in again.");
 
       const authHeaders = {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${token}`, //
+        Authorization: `Bearer ${token}`,
       };
 
-      // --- THIS IS THE CHANGE ---
+      // Pass the page number to the API
       const res = await fetch(
-        `/api/wholesaler/products?page=${page}&limit=12`,
+        `/api/wholesaler/products?page=${page}&limit=${PRODUCTS_PER_PAGE}`,
         {
           headers: authHeaders,
+          cache: "no-store",
         }
       );
 
@@ -99,35 +112,18 @@ export default function WholesalerProductsPage() {
   };
 
   useEffect(() => {
-    if (isAuthLoading) return;
-    fetchProducts();
+    if (!isAuthLoading) fetchProducts();
   }, [page, isAuthLoading]);
 
-  if (isAuthLoading) {
-  return (
-    <WholesalerLayout>
-      <div className="flex justify-center items-center py-10">
-        <Loader2 className="h-8 w-8 animate-spin" />
-        <p className="ml-2">Verifying access...</p>
-      </div>
-    </WholesalerLayout>
-  );
-}
-
-  // Delete Product Handler
   const handleDeleteProduct = async (productId) => {
     setError(null);
     try {
       const token = localStorage.getItem("token");
       if (!token) throw new Error("No authorization token found.");
 
-      // --- THIS IS THE CHANGE ---
       const res = await fetch(`/api/wholesaler/products/${productId}`, {
-        // We need to create this API route
         method: "DELETE",
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
+        headers: { Authorization: `Bearer ${token}` },
       });
 
       if (!res.ok) {
@@ -135,18 +131,35 @@ export default function WholesalerProductsPage() {
         throw new Error(errData.error || "Failed to delete product");
       }
 
-      fetchProducts(); // Refresh the product list
+      fetchProducts(); // Refresh list
     } catch (err) {
       console.error(err);
       setError(err.message);
     }
   };
 
+  // --- Pagination Handler ---
+  const handlePageChange = (newPage) => {
+    if (newPage >= 1 && newPage <= totalPages) {
+      setPage(newPage);
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    }
+  };
+
+  if (isAuthLoading) {
+    return (
+      <WholesalerLayout>
+        <div className="flex justify-center items-center py-10">
+          <Loader2 className="h-8 w-8 animate-spin" />
+        </div>
+      </WholesalerLayout>
+    );
+  }
+
   return (
     <WholesalerLayout>
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-3xl font-bold">All Products (Wholesaler)</h1>
-        {/* --- THIS IS THE CHANGE --- */}
         <Link href="/wholesaler/products/new" passHref>
           <Button>
             <PlusCircle className="mr-2 h-4 w-4" />
@@ -165,12 +178,7 @@ export default function WholesalerProductsPage() {
         <Alert variant="destructive" className="mb-6">
           <AlertTriangle className="h-4 w-4" />
           <AlertTitle>Error</AlertTitle>
-          <AlertDescription>
-            {error}
-            <p className="text-xs mt-2">
-              Make sure you are logged in as a WHOLESALLER.
-            </p>
-          </AlertDescription>
+          <AlertDescription>{error}</AlertDescription>
         </Alert>
       )}
 
@@ -181,8 +189,9 @@ export default function WholesalerProductsPage() {
             <Card key={product._id}>
               <CardHeader className="pb-2">
                 <div className="flex items-start justify-between">
-                  <CardTitle className="text-lg">{product.name}</CardTitle>
-                  {/* --- THIS IS THE CHANGE --- */}
+                  <CardTitle className="text-lg truncate">
+                    {product.name}
+                  </CardTitle>
                   <ProductDropdownMenu
                     product={product}
                     onDelete={() => handleDeleteProduct(product._id)}
@@ -211,7 +220,7 @@ export default function WholesalerProductsPage() {
                   <span className="font-medium text-black">
                     {totalStockFrom(product)}
                   </span>
-                  <span className="ml-1">Remaining Products</span>
+                  <span className="ml-1">Total Stock</span>
                 </div>
               </CardFooter>
             </Card>
@@ -228,11 +237,52 @@ export default function WholesalerProductsPage() {
           </CardContent>
         </Card>
       )}
+
+      {/* --- Pagination Controls --- */}
+      {!loading && !error && totalPages > 1 && (
+        <div className="mt-8">
+          <Pagination>
+            <PaginationContent>
+              <PaginationItem>
+                <PaginationPrevious
+                  href="#"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    handlePageChange(page - 1);
+                  }}
+                  className={page <= 1 ? "pointer-events-none opacity-50" : ""}
+                />
+              </PaginationItem>
+
+              <PaginationItem>
+                <PaginationLink href="#" isActive>
+                  {page}
+                </PaginationLink>
+              </PaginationItem>
+
+              <PaginationItem>
+                <PaginationNext
+                  href="#"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    handlePageChange(page + 1);
+                  }}
+                  className={
+                    page >= totalPages ? "pointer-events-none opacity-50" : ""
+                  }
+                />
+              </PaginationItem>
+            </PaginationContent>
+          </Pagination>
+          <div className="text-center text-xs text-muted-foreground mt-2">
+            Page {page} of {totalPages}
+          </div>
+        </div>
+      )}
     </WholesalerLayout>
   );
 }
 
-// --- UPDATED: Helper component for the "..." menu ---
 function ProductDropdownMenu({ product, onDelete }) {
   return (
     <AlertDialog>
@@ -245,13 +295,11 @@ function ProductDropdownMenu({ product, onDelete }) {
         <DropdownMenuContent align="end">
           <DropdownMenuLabel>Actions</DropdownMenuLabel>
           <DropdownMenuItem asChild>
-            {/* View still goes to the public product page */}
             <Link href={`/product/${product._id}`} target="_blank">
               View (Public Page)
             </Link>
           </DropdownMenuItem>
           <DropdownMenuItem asChild>
-            {/* --- THIS IS THE CHANGE --- */}
             <Link href={`/wholesaler/products/${product._id}/edit`}>Edit</Link>
           </DropdownMenuItem>
           <DropdownMenuSeparator />
@@ -263,7 +311,6 @@ function ProductDropdownMenu({ product, onDelete }) {
         </DropdownMenuContent>
       </DropdownMenu>
 
-      {/* This is the Delete confirmation dialog */}
       <AlertDialogContent>
         <AlertDialogHeader>
           <AlertDialogTitle>Are you absolutely sure?</AlertDialogTitle>
