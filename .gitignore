@@ -145,12 +145,7 @@ dump/
 data/
 mongodb-data/
 
-# =====================
-# Uploads (if using local storage in your project)
-# =====================
 
-public/uploads/
-uploads/
 
 # =====================
 # Misc
