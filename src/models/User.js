@@ -24,6 +24,16 @@ const addressSchema = new Schema({
 }, { _id: true });
 // --- END UPDATED SUB-SCHEMA ---
 
+// --- NEW SUB-SCHEMA: Feedback (Reviews for the User) ---
+const FeedbackSchema = new Schema({
+  reviewerId: { type: Schema.Types.ObjectId, ref: "User" }, // Tracks who left the feedback
+  rating: { type: Number, required: true, min: 1, max: 5 },
+  comment: { type: String, default: "" },
+  author: { type: String }, // Snapshot of the reviewer's name
+  createdAt: { type: Date, default: Date.now }
+});
+// --- END NEW SUB-SCHEMA ---
+
 const userSchema = new mongoose.Schema({
   name: { type: String },
   email: { type: String, index: true, sparse: true, unique: true },
@@ -40,7 +50,10 @@ const userSchema = new mongoose.Schema({
   resetOtp: { type: String },
   resetOtpExpiry: { type: Number },
   resetAttempts: { type: Number },
-  addresses: [addressSchema]
+  addresses: [addressSchema],
+  
+  // --- NEW FIELD: Array of Feedback reviews ---
+  Feedback: [FeedbackSchema]
 }, { timestamps: true });
 
 export default mongoose.models.User || mongoose.model("User", userSchema);

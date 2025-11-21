@@ -3,11 +3,14 @@ import mongoose from "mongoose";
 
 const { Schema } = mongoose;
 
-/* --- (all your existing sub-schemas) --- */
+/* --- Sub-Schemas --- */
+
+// Updated ReviewSchema to link to a User (Retailer or Customer)
 const ReviewSchema = new Schema({
+  userId: { type: Schema.Types.ObjectId, ref: "User" }, // Tracks who left the review
   rating: { type: Number, required: true, min: 1, max: 5 },
   comment: { type: String, default: "" },
-  author: { type: String },
+  author: { type: String }, // Snapshot of the user's name at the time of review
   createdAt: { type: Date, default: Date.now },
 });
 
@@ -44,8 +47,6 @@ const WarehouseSchema = new Schema(
   { _id: false }
 );
 
-// --- NEW SCHEMA: ManufacturedAtSchema ---
-// Uses the same structure as a warehouse location, but without leadTimeDays
 const ManufacturedAtSchema = new Schema(
   {
     name: { type: String },
@@ -61,7 +62,6 @@ const ManufacturedAtSchema = new Schema(
   },
   { _id: false }
 );
-// ----------------------------------------
 
 const ProductDetailsSchema = new Schema(
   {
@@ -80,7 +80,6 @@ const ProductDetailsSchema = new Schema(
 /* --- Main Product Schema --- */
 const ProductSchema = new Schema(
   {
-    // --- NEW FIELD ---
     // Tracks who owns this product document (Retailer or Wholesaler).
     ownerId: {
       type: Schema.Types.ObjectId,
@@ -89,7 +88,6 @@ const ProductSchema = new Schema(
       index: true,
     },
 
-    // --- NEW FIELD ---
     // If this is a Retail Listing (ownerId is a Retailer),
     // this field links back to the Wholesaler's original "Base Product".
     wholesaleSourceId: {
@@ -99,19 +97,18 @@ const ProductSchema = new Schema(
       index: true,
     },
 
-    // --- NEW FIELD: Manufactured At Location ---
+    // Manufactured At Location
     manufacturedAt: {
-      type: ManufacturedAtSchema, // Embedded document
+      type: ManufacturedAtSchema,
       default: null,
     },
-    // -------------------------------------------
 
     /* --- Existing Fields --- */
     name: { type: String, required: true, index: true },
     slug: { type: String, index: true },
     description: { type: String },
     brand: { type: String },
-    retailer: { type: String }, // This field is now technically redundant, but we'll leave it.
+    retailer: { type: String }, // Redundant but kept for backward compatibility
     category: { type: String },
     price: { type: Number, required: true },
     discount: { type: Number, default: 0, min: 0, max: 100 },
@@ -119,7 +116,7 @@ const ProductSchema = new Schema(
     sizes: [SizeVariantSchema],
     sizeChart: SizeChartSchema,
     productDetails: ProductDetailsSchema,
-    reviews: [ReviewSchema],
+    reviews: [ReviewSchema], // Embeds the updated ReviewSchema
     warehouses: [WarehouseSchema],
     totalStock: { type: Number, default: 0 },
     tags: [String],
@@ -131,7 +128,7 @@ const ProductSchema = new Schema(
   { timestamps: true }
 );
 
-/* --- Existing Methods & Statics --- */
+/* --- Methods & Statics --- */
 
 /**
  * helper to recalc totalStock (instance method)
@@ -149,7 +146,6 @@ ProductSchema.methods.recalculateStock = function () {
  * get best delivery estimate
  */
 ProductSchema.methods.estimateDeliveryTo = function (customerLocation = {}) {
-  // ... (existing logic) ...
   const whs = this.warehouses || [];
   if (!whs.length)
     return { estimatedDays: null, reason: "no warehouses configured" };
@@ -167,7 +163,7 @@ ProductSchema.methods.estimateDeliveryTo = function (customerLocation = {}) {
       method: "pincode-match",
     };
   }
-  // ... (rest of your logic) ...
+
   const byCity = whs.find(
     (w) =>
       w.city &&
@@ -213,7 +209,6 @@ ProductSchema.methods.estimateDeliveryTo = function (customerLocation = {}) {
 ProductSchema.statics.computeTotalStockForPlainObject = function (
   productPlain = {}
 ) {
-  // ... (existing logic) ...
   if (!productPlain) return 0;
   if (
     typeof productPlain.totalStock === "number" &&
@@ -236,7 +231,6 @@ ProductSchema.statics.computeTotalStockForPlainObject = function (
  * OPTIONAL STATIC HELPER: recalculateAndPersist
  */
 ProductSchema.statics.recalculateAndPersist = async function (productId) {
-  // ... (existing logic) ...
   if (!productId) throw new Error("productId required");
   const Product = this;
   const doc = await Product.findById(productId);
