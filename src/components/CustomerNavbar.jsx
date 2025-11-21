@@ -1,3 +1,4 @@
+// src/components/CustomerNavbar.jsx
 import React, { useState, useEffect } from "react";
 import Link from "next/link";
 import { useRouter } from "next/router";
@@ -14,13 +15,28 @@ import {
 } from "@/components/ui/dropdown-menu";
 import CustomerAddressModal from "@/components/CustomerAddressModal";
 
+// Helper to load cart from localStorage
+function loadCart() {
+  try { return JSON.parse(localStorage.getItem("livemart_cart") || "[]"); } catch (e) { return []; }
+}
+
 export default function CustomerNavbar() {
   const router = useRouter();
   const [user, setUser] = useState(null);
   
+  // --- Cart State (NEW: Tracks unique item count) ---
+  const [cartItemCount, setCartItemCount] = useState(0); 
+
   // --- Address & Modal State ---
   const [isAddressModalOpen, setIsAddressModalOpen] = useState(false);
   const [selectedAddress, setSelectedAddress] = useState(null);
+
+  // Helper: Update Cart Count
+  const updateCartCount = () => {
+    const cart = loadCart();
+    // Count is the number of distinct items (cart array length)
+    setCartItemCount(cart.length); 
+  };
 
   // Helper: Update Local Storage & Dispatch Event
   const setActiveLocation = (addressObj) => {
@@ -49,6 +65,19 @@ export default function CustomerNavbar() {
 
   // Check if user is logged in on mount
   useEffect(() => {
+    // Initial cart load
+    updateCartCount();
+    
+    // Listen for storage events (cart changes)
+    const handleStorageChange = (e) => {
+        // Since we modify the cart in the product/cart pages, listening to 'storage' 
+        // and manually calling the update handles cross-tab and in-tab updates.
+        updateCartCount();
+    };
+    
+    window.addEventListener("storage", handleStorageChange);
+    window.addEventListener("livemart-cart-update", updateCartCount); // Custom event listener for cart changes
+
     async function checkAuth() {
       try {
         const res = await fetch("/api/auth/me", { credentials: "include" });
@@ -56,14 +85,11 @@ export default function CustomerNavbar() {
           const data = await res.json();
           setUser(data.user);
           
-          // --- LOCATION INITIALIZATION LOGIC ---
-          // 1. Check if we already have a selected location in Storage
+          // --- LOCATION INITIALIZATION LOGIC (unchanged) ---
           const savedLoc = localStorage.getItem("livemart_active_location");
           
           if (savedLoc) {
-            // Use saved location
             const parsed = JSON.parse(savedLoc);
-            // Reconstruct enough of the object for the UI
             setSelectedAddress({
               city: parsed.city,
               pincode: parsed.pincode,
@@ -71,12 +97,10 @@ export default function CustomerNavbar() {
               location: { coordinates: [parsed.lng, parsed.lat] }
             });
           } else if (data.user?.addresses?.length > 0) {
-            // 2. If NO saved location but User has addresses, Default to First Address
             setActiveLocation(data.user.addresses[0]);
           }
         } else {
           setUser(null);
-          // If guest, check storage for existing guest location
           const savedLoc = localStorage.getItem("livemart_active_location");
           if (savedLoc) {
              const parsed = JSON.parse(savedLoc);
@@ -92,7 +116,12 @@ export default function CustomerNavbar() {
       }
     }
     checkAuth();
-  }, []);
+    
+    return () => {
+        window.removeEventListener("storage", handleStorageChange);
+        window.removeEventListener("livemart-cart-update", updateCartCount);
+    };
+  }, [router]);
 
   const handleLogout = async () => {
     try {
@@ -105,7 +134,7 @@ export default function CustomerNavbar() {
     }
   };
 
-  // --- Handle Address Actions ---
+  // --- Handle Address Actions (unchanged) ---
   const handleAddressSelect = (address) => {
     setActiveLocation(address);
     setIsAddressModalOpen(false);
@@ -113,7 +142,6 @@ export default function CustomerNavbar() {
 
   const handleAddressAdded = (updatedUser) => {
     setUser(updatedUser); 
-    // Auto-select the newly added address
     if (updatedUser.addresses && updatedUser.addresses.length > 0) {
       setActiveLocation(updatedUser.addresses[updatedUser.addresses.length - 1]);
     }
@@ -127,7 +155,7 @@ export default function CustomerNavbar() {
     }
   };
 
-  // Menu Data
+  // Menu Data (unchanged)
   const categories = ["Men", "Women", "Girls", "Boys"];
   const items = ["Shirts", "T-shirts", "Hoodies", "Sweatshirts", "Jeans", "Shorts", "Tracks"];
 
@@ -177,7 +205,7 @@ export default function CustomerNavbar() {
             <Input className="w-full bg-[#F0F0F0] border-none rounded-full pl-12 h-11 text-base focus-visible:ring-1 focus-visible:ring-gray-300 placeholder:text-gray-400" placeholder="Search for products..." />
           </div>
 
-          {/* --- DELIVER TO BUTTON --- */}
+          {/* --- DELIVER TO BUTTON (unchanged) --- */}
           <Button 
             variant="ghost" 
             className="hidden lg:flex items-center gap-2 px-2 hover:bg-gray-100 rounded-lg h-11"
@@ -199,6 +227,13 @@ export default function CustomerNavbar() {
             <Link href="/cart">
               <Button variant="ghost" size="icon" className="relative hover:bg-gray-100 rounded-full w-10 h-10">
                 <ShoppingCart className="h-6 w-6" />
+                {/* --- FIX: Cart Count Bubble (Blue color) --- */}
+                {cartItemCount > 0 && (
+                  <span className="absolute top-0 right-0 inline-flex items-center justify-center px-2 py-1 text-xs font-bold leading-none text-white transform translate-x-1/2 -translate-y-1/2 bg-blue-600 rounded-full">
+                    {cartItemCount}
+                  </span>
+                )}
+                {/* ------------------------------------------- */}
               </Button>
             </Link>
 
@@ -250,7 +285,7 @@ export default function CustomerNavbar() {
         </div>
       </nav>
 
-      {/* --- Address Modal --- */}
+      {/* --- Address Modal (unchanged) --- */}
       {user && (
         <CustomerAddressModal 
           isOpen={isAddressModalOpen} 
