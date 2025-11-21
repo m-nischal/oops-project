@@ -1,7 +1,6 @@
-// src/components/ProductCard.jsx
 import React from "react";
 import Link from "next/link";
-import { Card, CardContent, CardFooter } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Star, StarHalf } from "lucide-react";
 
 // Helper to render stars
@@ -20,11 +19,11 @@ function StarRating({ rating }) {
   );
 }
 
-export default function ProductCard({ product }) {
+export default function ProductCard({ product, label }) {
   // Calculate average rating from reviews (if any), default to 4.5 for demo
   const rating = product.reviews?.length 
     ? (product.reviews.reduce((acc, r) => acc + r.rating, 0) / product.reviews.length).toFixed(1)
-    : "4.5"; // Default mock rating to match design style
+    : "4.5"; 
 
   return (
     <Link href={`/product/${product._id}`} className="group">
@@ -36,6 +35,15 @@ export default function ProductCard({ product }) {
                alt={product.name}
                className="w-full h-full object-cover object-center"
              />
+             
+             {/* --- NEW: LABEL BADGE --- */}
+             {label && (
+               <span className="absolute top-3 right-3 bg-white/90 backdrop-blur-sm text-black text-[10px] font-black px-3 py-1.5 rounded-full uppercase tracking-wider shadow-sm z-10">
+                 {label}
+               </span>
+             )}
+             {/* ------------------------ */}
+             
           </div>
           <h3 className="font-bold text-lg truncate mb-1 group-hover:text-primary">{product.name}</h3>
           <StarRating rating={Number(rating)} />

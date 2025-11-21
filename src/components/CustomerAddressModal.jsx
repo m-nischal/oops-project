@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect, useRef, useCallback } from "react";
-import { MapPin, Check, Plus, Loader2, Save, LocateFixed, ArrowLeft } from "lucide-react";
+import { MapPin, Check, Plus, Loader2, Save, LocateFixed, ArrowLeft, Info, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -9,6 +9,7 @@ import {
   DialogHeader,
   DialogTitle,
   DialogDescription,
+  DialogFooter,
 } from "@/components/ui/dialog";
 import { Card } from "@/components/ui/card";
 import { GoogleMap, useLoadScript, Marker } from "@react-google-maps/api";
@@ -31,7 +32,7 @@ const COUNTRY_DATA = [
   { country: "Sri Lanka", code: "+94", flag: "🇱🇰", lat: 7.8731, lng: 80.7718, iso2: "LK" },
 ].sort((a, b) => a.country.localeCompare(b.country));
 
-export default function CustomerAddressModal({ isOpen, addresses, onSelect, onAddressAdded }) {
+export default function CustomerAddressModal({ isOpen, onClose, addresses, onSelect, onAddressAdded }) {
   const [mode, setMode] = useState("select"); // 'select' or 'add'
   const [selectedId, setSelectedId] = useState(null);
 
@@ -91,11 +92,8 @@ export default function CustomerAddressModal({ isOpen, addresses, onSelect, onAd
   };
 
   return (
-    <Dialog open={isOpen} onOpenChange={() => {}}>
-      <DialogContent 
-        className="sm:max-w-[600px] max-h-[90vh] overflow-y-auto" 
-        onPointerDownOutside={(e) => e.preventDefault()}
-      >
+    <Dialog open={isOpen} onOpenChange={(open) => { if (!open) onClose(); }}>
+      <DialogContent className="sm:max-w-[600px] max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="text-2xl font-bold text-center">
             {mode === "select" ? "Select Your Location" : "Add New Address"}
@@ -207,10 +205,12 @@ function AddressForm({ onSave, onCancel }) {
   const [markerPosition, setMarkerPosition] = useState(null);
   const [isLocating, setIsLocating] = useState(false);
   
+  // Permission Help State
+  const [showPermissionHelp, setShowPermissionHelp] = useState(false);
+  
   const mapRef = useRef(null);
   const addressSearchSetValueRef = useRef(null);
-  const hasManualLocationRef = useRef(false);
-
+  
   const updateLocationAndAddress = useCallback(async (lat, lng, pan = true) => {
     const latLng = { lat, lng };
     setMarkerPosition(latLng);
@@ -271,7 +271,12 @@ function AddressForm({ onSave, onCancel }) {
         updateLocationAndAddress(latitude, longitude, true);
         setIsLocating(false);
       },
-      () => setIsLocating(false)
+      (error) => {
+        console.warn("Location access denied:", error);
+        setIsLocating(false);
+        // Trigger Permission Help Dialog when access is denied
+        setShowPermissionHelp(true);
+      }
     );
   }, [updateLocationAndAddress]);
 
@@ -292,91 +297,135 @@ function AddressForm({ onSave, onCancel }) {
   };
 
   return (
-    <form onSubmit={handleSubmit} className="grid gap-4 py-2">
-      <div className="flex justify-between items-center">
-        <Button type="button" variant="ghost" size="sm" onClick={onCancel} className="p-0 h-auto hover:bg-transparent">
-            <ArrowLeft className="h-4 w-4 mr-2"/> Back
+    <>
+      <form onSubmit={handleSubmit} className="grid gap-4 py-2">
+        <div className="flex justify-between items-center">
+          <Button type="button" variant="ghost" size="sm" onClick={onCancel} className="p-0 h-auto hover:bg-transparent">
+              <ArrowLeft className="h-4 w-4 mr-2"/> Back
+          </Button>
+        </div>
+
+        <div className="space-y-2">
+          <Label>Address Label</Label>
+          <Input value={address.label} onChange={(e) => handleChange('label', e.target.value)} placeholder="e.g., Home, Work" />
+        </div>
+
+        <div className="grid grid-cols-2 gap-4">
+          <div className="space-y-2">
+            <Label>First Name</Label>
+            <Input value={address.firstName} onChange={(e) => handleChange('firstName', e.target.value)} required />
+          </div>
+          <div className="space-y-2">
+            <Label>Last Name</Label>
+            <Input value={address.lastName} onChange={(e) => handleChange('lastName', e.target.value)} />
+          </div>
+        </div>
+
+        <div className="space-y-2">
+          <Label>Search Address</Label>
+          <AddressAutocomplete 
+            onSelect={(desc, { lat, lng }) => updateLocationAndAddress(lat, lng)}
+            setExternalValueRef={addressSearchSetValueRef}
+          />
+          <Button type="button" variant="outline" size="sm" onClick={locateUser} disabled={isLocating} className="w-full mt-1">
+            {isLocating ? <Loader2 className="animate-spin h-4 w-4 mr-2" /> : <LocateFixed className="h-4 w-4 mr-2" />}
+            Use Current Location
+          </Button>
+          
+          <div className="h-[200px] w-full rounded-md overflow-hidden border mt-2">
+            <GoogleMap
+              zoom={markerPosition ? 15 : 5}
+              center={mapCenter}
+              mapContainerClassName="w-full h-full"
+              onClick={(e) => updateLocationAndAddress(e.latLng.lat(), e.latLng.lng())}
+              onLoad={(map) => (mapRef.current = map)}
+            >
+              {markerPosition && <Marker position={markerPosition} draggable onDragEnd={(e) => updateLocationAndAddress(e.latLng.lat(), e.latLng.lng())} />}
+            </GoogleMap>
+          </div>
+        </div>
+
+        <div className="space-y-2">
+          <Label>Address Line 1</Label>
+          <Input value={address.addressLine1} onChange={(e) => handleChange('addressLine1', e.target.value)} required />
+        </div>
+
+        <div className="grid grid-cols-3 gap-4">
+          <div className="space-y-2">
+            <Label>City</Label>
+            <Input value={address.city} onChange={(e) => handleChange('city', e.target.value)} required />
+          </div>
+          <div className="space-y-2">
+            <Label>State</Label>
+            <Input value={address.state} onChange={(e) => handleChange('state', e.target.value)} />
+          </div>
+          <div className="space-y-2">
+            <Label>Pincode</Label>
+            <Input value={address.pincode} onChange={(e) => handleChange('pincode', e.target.value)} />
+          </div>
+        </div>
+
+        <div className="space-y-2">
+          <Label>Mobile Number</Label>
+          <div className="flex gap-2">
+            <select 
+              className="border rounded-md px-2 text-sm bg-background"
+              value={address.countryCode}
+              onChange={(e) => handleChange('countryCode', e.target.value)}
+            >
+              {COUNTRY_DATA.map(c => <option key={c.code} value={c.code}>{c.flag} {c.code}</option>)}
+            </select>
+            <Input value={address.phone} onChange={(e) => handleChange('phone', e.target.value)} required type="tel" />
+          </div>
+        </div>
+
+        <Button type="submit" className="w-full mt-2">
+          <Save className="mr-2 h-4 w-4" /> Save Address
         </Button>
-      </div>
+      </form>
 
-      <div className="space-y-2">
-        <Label>Address Label</Label>
-        <Input value={address.label} onChange={(e) => handleChange('label', e.target.value)} placeholder="e.g., Home, Work" />
-      </div>
+      {/* --- PERMISSION HELP DIALOG --- */}
+      <Dialog open={showPermissionHelp} onOpenChange={setShowPermissionHelp}>
+        <DialogContent className="sm:max-w-[450px] z-[60]">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Info className="h-5 w-5 text-blue-600" />
+              Enable Location Access
+            </DialogTitle>
+            <DialogDescription>
+              Your browser is blocking location access. Here is how to fix it:
+            </DialogDescription>
+          </DialogHeader>
+          
+          <div className="space-y-4 py-2 text-sm text-gray-600">
+            <div className="flex gap-3 items-start">
+              <div className="bg-gray-100 px-2 py-1 rounded font-mono text-xs font-bold text-black">1</div>
+              <p>Click the <strong>Lock icon</strong> or <strong>Settings icon</strong> on the left side of your address bar (URL bar).</p>
+            </div>
+            <div className="flex gap-3 items-start">
+              <div className="bg-gray-100 px-2 py-1 rounded font-mono text-xs font-bold text-black">2</div>
+              <p>Look for <strong>Location</strong> permissions and switch it to <strong>Allow</strong> or toggle it On.</p>
+            </div>
+            <div className="flex gap-3 items-start">
+              <div className="bg-gray-100 px-2 py-1 rounded font-mono text-xs font-bold text-black">3</div>
+              <p>Close this popup and click the button below to refresh.</p>
+            </div>
+          </div>
 
-      <div className="grid grid-cols-2 gap-4">
-        <div className="space-y-2">
-          <Label>First Name</Label>
-          <Input value={address.firstName} onChange={(e) => handleChange('firstName', e.target.value)} required />
-        </div>
-        <div className="space-y-2">
-          <Label>Last Name</Label>
-          <Input value={address.lastName} onChange={(e) => handleChange('lastName', e.target.value)} />
-        </div>
-      </div>
-
-      <div className="space-y-2">
-        <Label>Search Address</Label>
-        <AddressAutocomplete 
-          onSelect={(desc, { lat, lng }) => updateLocationAndAddress(lat, lng)}
-          setExternalValueRef={addressSearchSetValueRef}
-        />
-        <Button type="button" variant="outline" size="sm" onClick={locateUser} disabled={isLocating} className="w-full mt-1">
-          {isLocating ? <Loader2 className="animate-spin h-4 w-4 mr-2" /> : <LocateFixed className="h-4 w-4 mr-2" />}
-          Use Current Location
-        </Button>
-        
-        <div className="h-[200px] w-full rounded-md overflow-hidden border mt-2">
-          <GoogleMap
-            zoom={markerPosition ? 15 : 5}
-            center={mapCenter}
-            mapContainerClassName="w-full h-full"
-            onClick={(e) => updateLocationAndAddress(e.latLng.lat(), e.latLng.lng())}
-            onLoad={(map) => (mapRef.current = map)}
-          >
-            {markerPosition && <Marker position={markerPosition} draggable onDragEnd={(e) => updateLocationAndAddress(e.latLng.lat(), e.latLng.lng())} />}
-          </GoogleMap>
-        </div>
-      </div>
-
-      <div className="space-y-2">
-        <Label>Address Line 1</Label>
-        <Input value={address.addressLine1} onChange={(e) => handleChange('addressLine1', e.target.value)} required />
-      </div>
-
-      <div className="grid grid-cols-3 gap-4">
-        <div className="space-y-2">
-          <Label>City</Label>
-          <Input value={address.city} onChange={(e) => handleChange('city', e.target.value)} required />
-        </div>
-        <div className="space-y-2">
-          <Label>State</Label>
-          <Input value={address.state} onChange={(e) => handleChange('state', e.target.value)} />
-        </div>
-        <div className="space-y-2">
-          <Label>Pincode</Label>
-          <Input value={address.pincode} onChange={(e) => handleChange('pincode', e.target.value)} />
-        </div>
-      </div>
-
-      <div className="space-y-2">
-        <Label>Mobile Number</Label>
-        <div className="flex gap-2">
-          <select 
-            className="border rounded-md px-2 text-sm bg-background"
-            value={address.countryCode}
-            onChange={(e) => handleChange('countryCode', e.target.value)}
-          >
-            {COUNTRY_DATA.map(c => <option key={c.code} value={c.code}>{c.flag} {c.code}</option>)}
-          </select>
-          <Input value={address.phone} onChange={(e) => handleChange('phone', e.target.value)} required type="tel" />
-        </div>
-      </div>
-
-      <Button type="submit" className="w-full mt-2">
-        <Save className="mr-2 h-4 w-4" /> Save Address
-      </Button>
-    </form>
+          <DialogFooter>
+            <Button 
+              onClick={() => {
+                setShowPermissionHelp(false);
+                window.location.reload(); 
+              }} 
+              className="w-full"
+            >
+              <RefreshCw className="mr-2 h-4 w-4" /> I've Enabled It, Refresh Page
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }
 
