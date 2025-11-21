@@ -1,105 +1,344 @@
-// src/pages/delivery/assigned.js
-import { useEffect, useState } from "react";
-import Link from "next/link";
+import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/router";
+import { Clock, Package, RefreshCw, Search } from "lucide-react";
+
+import DeliveryLogin from "../../components/DeliveryLogin";
+import OrderRequests from "../../components/OrderRequests"; 
+import ActiveDeliveries from "../../components/ActiveDeliveries";
+import DeliveryDetail from "../../components/DeliveryDetail";
 
 export default function AssignedPage() {
   const router = useRouter();
+
+  // UI State
+  const [activeTab, setActiveTab] = useState("requests");
+  const [searchQuery, setSearchQuery] = useState("");
+
+  // Data State
   const [deliveries, setDeliveries] = useState([]);
+  const [selected, setSelected] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [authChecked, setAuthChecked] = useState(false);
 
+  // -------------------------------
+  // AUTH CHECK
+  // -------------------------------
   useEffect(() => {
     (async () => {
       try {
-        // check session + role
-        const meRes = await fetch("/api/auth/me", { credentials: "include" });
+        const meRes = await fetch("/api/auth/me", { credentials: "same-origin" });
         if (!meRes.ok) return router.replace("/delivery/login");
+
         const meData = await meRes.json();
         if (!meData.ok || !meData.user) return router.replace("/delivery/login");
-        if ((meData.user.role || "").toUpperCase() !== "DELIVERY") return router.replace("/");
+        if ((meData.user.role || "").toUpperCase() !== "DELIVERY")
+          return router.replace("/");
 
-        // fetch deliveries assigned to this agent
-        const res = await fetch("/api/delivery", { credentials: "include" });
-        const data = await res.json();
-        if (!res.ok || !data.ok) throw new Error(data?.error || "Failed to load deliveries");
-        setDeliveries(data.deliveries || []);
+        setAuthChecked(true);
+        await fetchDeliveries();
       } catch (err) {
-        console.error("Assigned page error:", err);
-        setError(err.message || "Failed to load deliveries");
-      } finally {
-        setLoading(false);
+        console.error("Auth error:", err);
+        router.replace("/delivery/login");
       }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  if (loading) return <div style={{ padding: 24 }}>Loading...</div>;
-  if (error) return <div style={{ padding: 24, color: "red" }}>{error}</div>;
+  // -------------------------------
+  // FETCH DELIVERIES
+  // -------------------------------
+  const fetchDeliveries = useCallback(async () => {
+    setLoading(true);
+    setError("");
 
-  return (
-    <div style={{ padding: 24 }}>
-      <header style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
-        <h2 style={{ margin: 0 }}>Assigned deliveries</h2>
-        <div>
-          <button
-            onClick={() => {
-              setLoading(true);
-              setError("");
-              // simple refresh
-              fetch("/api/delivery", { credentials: "include" })
-                .then((r) => r.json())
-                .then((d) => {
-                  if (d?.ok) setDeliveries(d.deliveries || []);
-                  else setError(d?.error || "Failed to refresh");
-                })
-                .catch((e) => setError(e.message || "Failed to refresh"))
-                .finally(() => setLoading(false));
+    try {
+      const res = await fetch("/api/delivery?status=PENDING,ASSIGNED,ACCEPTED,PICKED_UP,OUT_FOR_DELIVERY,IN_TRANSIT", {
+        method: "GET",
+        credentials: "same-origin",
+      });
+
+      if (res.status === 401) {
+        return router.replace("/delivery/login");
+      }
+
+      const data = await res.json();
+      if (!res.ok || !data.ok) throw new Error(data.error || "Failed to load deliveries");
+
+      const normalized = (data.deliveries || []).map((d) => ({
+        id: d._id ?? d.id,
+        ...d,
+      }));
+
+      setDeliveries(normalized);
+    } catch (err) {
+      console.error("Fetch deliveries error:", err);
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  }, [router]);
+
+  // -------------------------------
+  // API POST WRAPPER
+  // -------------------------------
+  async function apiPost(url, body = {}) {
+    try {
+      const res = await fetch(url, {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+
+      const data = await res.json().catch(() => ({ ok: false, error: "Invalid response" }));
+      if (!res.ok || !data.ok) throw new Error(data.error || "Action failed");
+
+      return data.delivery || data;
+    } catch (err) {
+      console.error("apiPost error:", err);
+      throw err;
+    }
+  }
+
+  // -------------------------------
+  // ACTION HANDLERS
+  // -------------------------------
+  const acceptOrder = async (id) => {
+    // optimistic update
+    setDeliveries((cur) => cur.map((o) => (o.id === id ? { ...o, status: "ACCEPTED" } : o)));
+
+    try {
+      const updated = await apiPost(`/api/delivery/${id}/accept`, { action: "accept" });
+
+      setDeliveries((cur) =>
+        cur.map((o) => (o.id === id ? updated : o))
+      );
+    } catch (err) {
+      alert("Accept failed: " + err.message);
+      fetchDeliveries();
+    }
+  };
+
+  const declineOrder = async (id) => {
+    const previous = deliveries.slice();
+    setDeliveries((cur) => cur.filter((o) => o.id !== id));
+
+    try {
+      await apiPost(`/api/delivery/${id}/accept`, { action: "decline" });
+    } catch (err) {
+      alert("Decline failed");
+      setDeliveries(previous);
+    }
+  };
+
+  const pickupOrder = async (id) => {
+    try {
+      const updated = await apiPost(`/api/delivery/${id}/status`, {
+        status: "PICKED_UP",
+      });
+
+      setDeliveries((cur) =>
+        cur.map((o) => (o.id === id ? updated : o))
+      );
+      setSelected(updated);
+    } catch (err) {
+      alert("Pickup failed: " + err.message);
+    }
+  };
+
+  // --- NEW: Handle "Start Delivery" (Out for delivery) ---
+  const startDelivery = async (id) => {
+    try {
+      const updated = await apiPost(`/api/delivery/${id}/status`, {
+        status: "OUT_FOR_DELIVERY",
+      });
+
+      setDeliveries((cur) =>
+        cur.map((o) => (o.id === id ? updated : o))
+      );
+      setSelected(updated); // Update selected so UI refreshes to show "Complete"
+    } catch (err) {
+      alert("Start delivery failed: " + err.message);
+    }
+  };
+
+  const deliverOrder = async (id, otp) => {
+    try {
+      await apiPost(`/api/delivery/${id}/status`, {
+        status: "DELIVERED",
+        otp,
+      });
+      
+      // Remove from active list upon success
+      setDeliveries((cur) => cur.filter((o) => o.id !== id));
+      setSelected(null);
+      alert("Delivery Verified & Completed!");
+    } catch (err) {
+      alert("Delivery failed: " + err.message);
+    }
+  };
+
+  // -------------------------------
+  // FILTER & SEARCH LISTS
+  // -------------------------------
+  const filteredDeliveries = deliveries.filter((o) => {
+    if (!searchQuery) return true;
+    const q = searchQuery.toLowerCase();
+    return `${o.externalOrderId || ''} ${o.dropoff?.name || ''} ${o.pickup?.name || ''}`
+      .toLowerCase()
+      .includes(q);
+  });
+
+  const newRequests = filteredDeliveries.filter(
+    (o) => (o.status || "").toUpperCase() === "ASSIGNED" || (o.status || "").toUpperCase() === "PENDING"
+  );
+
+  const activeRequests = filteredDeliveries.filter((o) =>
+    ["ACCEPTED", "PICKED_UP", "OUT_FOR_DELIVERY", "IN_TRANSIT"].includes(
+      (o.status || "").toUpperCase()
+    )
+  );
+
+  // -------------------------------
+  // RENDER: AUTH & LOADING
+  // -------------------------------
+  if (!authChecked) {
+    return (
+      <div className="min-h-screen flex items-center justify-center text-gray-600">
+        Checking authentication...
+      </div>
+    );
+  }
+
+  // -------------------------------
+  // RENDER: DETAIL VIEW OVERLAY
+  // -------------------------------
+  if (selected) {
+    return (
+      <div className="min-h-screen bg-gray-50 p-6">
+        <div className="max-w-4xl mx-auto">
+          <DeliveryDetail
+            order={{
+              id: selected.id,
+              restaurantName: selected.pickup?.name,
+              restaurantAddress: selected.pickup?.address,
+              customerName: selected.dropoff?.name,
+              customerAddress: selected.dropoff?.address,
+              customerPhone: selected.dropoff?.phone,
+              items: selected.items ?? [],
+              total: selected.total ?? 0,
+              distance: selected.distance,
+              status: selected.status,
+              externalOrderId: selected.externalOrderId,
+              estimatedEarnings: selected.estimatedEarnings || 0,
+              pickupTime: selected.pickupTime || "ASAP",
             }}
-            style={{ padding: "6px 10px" }}
+            onBack={() => setSelected(null)}
+            onPickup={() => pickupOrder(selected.id)}
+            onStartDelivery={() => startDelivery(selected.id)} // <--- THIS FIXED THE ERROR
+            onDeliver={(otp) => deliverOrder(selected.id, otp)}
+            onCancel={() => {
+              declineOrder(selected.id);
+              setSelected(null);
+            }}
+          />
+        </div>
+      </div>
+    );
+  }
+
+  // -------------------------------
+  // RENDER: MAIN DASHBOARD
+  // -------------------------------
+  return (
+    <div className="min-h-screen bg-gray-50 p-6">
+      {/* HEADER */}
+      <div className="flex flex-col md:flex-row justify-between items-center mb-8 max-w-5xl mx-auto gap-4">
+        <h2 className="text-2xl font-bold text-gray-900">Assigned Deliveries</h2>
+
+        <div className="flex items-center gap-3 w-full md:w-auto">
+          <div className="relative flex-1 md:flex-initial">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-gray-400" />
+            <input
+              placeholder="Search orders..."
+              className="pl-9 pr-4 py-2 border rounded-lg text-sm w-full focus:outline-none focus:ring-2 focus:ring-black"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+            />
+          </div>
+
+          <button
+            onClick={fetchDeliveries}
+            disabled={loading}
+            className="px-4 py-2 bg-black text-white rounded-lg text-sm font-medium flex items-center gap-2 hover:bg-gray-800 disabled:opacity-50"
           >
-            Refresh
+            <RefreshCw className={`size-4 ${loading ? "animate-spin" : ""}`} />
+            {loading ? "Refreshing" : "Refresh"}
           </button>
         </div>
-      </header>
+      </div>
 
-      {deliveries.length === 0 ? (
-        <div style={{ marginTop: 20 }}>No deliveries assigned.</div>
-      ) : (
-        <div style={{ display: "grid", gap: 12 }}>
-          {deliveries.map((d) => (
-            <div
-              key={d._id}
-              style={{
-                border: "1px solid #eee",
-                padding: 12,
-                borderRadius: 6,
-                display: "flex",
-                justifyContent: "space-between",
-                alignItems: "center",
-              }}
-            >
-              <div>
-                <div style={{ fontWeight: 600 }}>{d.externalOrderId || d._id}</div>
-                <div style={{ fontSize: 13, color: "#444" }}>
-                  {d.dropoff?.name || "—"} — {d.dropoff?.address || "No address"}
-                </div>
-                <div style={{ fontSize: 12, color: "#666" }}>Status: {d.status}</div>
-              </div>
+      {/* TOGGLE TABS */}
+      <div className="max-w-5xl mx-auto">
+        <div className="flex gap-2 bg-white p-1.5 rounded-full shadow-sm border border-gray-200 mb-8 max-w-xl mx-auto">
+          <button
+            onClick={() => setActiveTab("requests")}
+            className={`flex-1 py-2.5 px-6 rounded-full text-sm font-semibold transition-all flex items-center justify-center gap-2 ${
+              activeTab === "requests"
+                ? "bg-black text-white shadow-md"
+                : "text-gray-500 hover:bg-gray-50"
+            }`}
+          >
+            <Clock className="size-4" />
+            New Requests
+            {newRequests.length > 0 && (
+              <span className={`text-xs px-2 py-0.5 rounded-full ml-1 ${
+                  activeTab === "requests" ? "bg-white text-black" : "bg-blue-100 text-blue-600"
+              }`}>
+                {newRequests.length}
+              </span>
+            )}
+          </button>
 
-              <div style={{ display: "flex", gap: 8 }}>
-                {/* modern Next Link usage: no <a> child */}
-                <Link href={`/delivery/${d._id}`}>
-                  <button style={{ padding: "6px 10px", background: "#2563eb", color: "#fff", borderRadius: 4, border: "none" }}>
-                    View
-                  </button>
-                </Link>
-                {/* optional quick actions could go here */}
-              </div>
-            </div>
-          ))}
+          <button
+            onClick={() => setActiveTab("active")}
+            className={`flex-1 py-2.5 px-6 rounded-full text-sm font-semibold transition-all flex items-center justify-center gap-2 ${
+              activeTab === "active"
+                ? "bg-black text-white shadow-md"
+                : "text-gray-500 hover:bg-gray-50"
+            }`}
+          >
+            <Package className="size-4" />
+            Active Deliveries
+            {activeRequests.length > 0 && (
+              <span className={`text-xs px-2 py-0.5 rounded-full ml-1 ${
+                  activeTab === "active" ? "bg-white text-black" : "bg-blue-100 text-blue-600"
+              }`}>
+                {activeRequests.length}
+              </span>
+            )}
+          </button>
         </div>
-      )}
+
+        {/* CONTENT AREA */}
+        <div className="animate-in fade-in slide-in-from-bottom-2 duration-300">
+          {activeTab === "requests" ? (
+            <OrderRequests
+              orders={newRequests}
+              onAccept={acceptOrder}
+              onDecline={declineOrder}
+              onSelect={setSelected}
+            />
+          ) : (
+            <ActiveDeliveries
+              orders={activeRequests}
+              onSelectOrder={setSelected}
+              onStart={pickupOrder}
+            />
+          )}
+        </div>
+      </div>
     </div>
   );
-}
+} 

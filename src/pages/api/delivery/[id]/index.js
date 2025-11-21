@@ -22,6 +22,7 @@ export default async function handler(req, res) {
     if (role === "DELIVERY" && String(delivery.assignedTo) !== String(session.user._id)) {
       return res.status(403).json({ ok: false, error: "Forbidden" });
     }
+
     return res.json({ ok: true, delivery });
   } catch (err) {
     console.error("GET /api/delivery/[id] error:", err);

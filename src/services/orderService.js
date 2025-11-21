@@ -1,18 +1,10 @@
 // src/services/orderService.js
 import mongoose from "mongoose";
-import Order from "models/orderModel.js";
-import Product from "models/Product.js";
-import User from "models/User.js"; // Required to check buyer role
+import Order from "../models/orderModel.js";
+import Product from "../models/Product.js";
+import User from "../models/User.js"; 
+import Delivery from "../models/deliveryModel.js"; // <--- IMPORT ADDED
 import InventoryService, { InsufficientStockError as InvInsufficientStockError } from "./inventory.js";
-
-/**
- * @file OrderService
- * @brief Order creation and lifecycle helpers (get, list, status updates, refunds).
- *
- * This service coordinates with InventoryService for stock changes and uses
- * mongoose transactions to ensure atomic operations when modifying inventory
- * and orders together.
- */
 
 /** Base order error */
 class OrderError extends Error {}
@@ -24,15 +16,6 @@ class InvalidOrderParamsError extends OrderError {}
 export default class OrderService {
   /**
    * Create an order atomically: validates items, decrements stock, and saves order doc.
-   *
-   * On success the saved Mongoose Order document is returned.
-   *
-   * @param {Object} customer - { name, email, phone, address, customerLocation? }
-   * @param {Array<{productId, sizeLabel, qty}>} items
-   * @param {String} sellerId - The ID of the seller (Retailer or Wholesaler)
-   * @param {String} userId - The ID of the buyer (if they are a registered Retailer)
-   * @returns {Promise<Object>} saved Mongoose Order document
-   * @throws {OrderError|InsufficientStockError|Error}
    */
   static async createOrder(customer = {}, items = [], sellerId = null, userId = null)  {
     if (!Array.isArray(items) || items.length === 0) {
@@ -43,12 +26,12 @@ export default class OrderService {
     try {
       session.startTransaction();
 
-      // 1) Load product docs for all requested items (inside session) as model instances (no .lean())
+      // 1) Load product docs
       const productIds = [...new Set(items.map(i => String(i.productId)))];
       const products = await Product.find({ _id: { $in: productIds } }).session(session);
       const productMap = new Map(products.map(p => [String(p._id), p]));
 
-      // 2) Build order items with snapshots and validation
+      // 2) Build order items
       const orderItems = [];
       for (const it of items) {
         const pid = String(it.productId);
@@ -60,8 +43,6 @@ export default class OrderService {
         const qty = Math.max(0, Math.floor(Number(it.qty || 0)));
         if (qty <= 0) throw new OrderError(`Invalid quantity for product ${pid}`);
 
-        // For B2B (Retailer buying from Wholesaler), we might skip size checks if the wholesaler just sells "boxes"
-        // But for now, let's assume strict sizing.
         const size = Array.isArray(doc.sizes) ? doc.sizes.find(s => s.size === it.sizeLabel || s.size === it.size) : null;
         if (!size) throw new OrderError(`Size '${it.sizeLabel}' not found for product ${pid}`);
 
@@ -75,11 +56,10 @@ export default class OrderService {
           qty,
           unitPrice,
           subtotal
-          // per-item estimatedDelivery will be added later if available
         });
       }
 
-      // 3) Attempt multi-item atomic stock decrement using InventoryService (throws on insufficient)
+      // 3) Attempt multi-item atomic stock decrement
       const inventoryItems = items.map(i => ({ productId: i.productId, sizeLabel: i.sizeLabel, qty: i.qty }));
       await InventoryService.decreaseStockForItems(inventoryItems, session);
 
@@ -90,10 +70,7 @@ export default class OrderService {
       const discount = 0;
       const total = subtotal + shipping + tax - discount;
 
-      // ----------------------------
       // Compute estimated delivery
-      // ----------------------------
-      // Use the Product instance method estimateDeliveryTo(customerLocation) if available.
       const customerLocation = (customer && (customer.customerLocation || customer.location)) || {};
       const perItemEstimates = [];
 
@@ -103,37 +80,32 @@ export default class OrderService {
         if (!prod) continue;
 
         try {
-          // product.estimateDeliveryTo may be sync or async; await works for either
           const raw = await prod.estimateDeliveryTo(customerLocation || {});
           if (raw) {
             const date = raw instanceof Date ? raw : new Date(raw);
             if (!isNaN(date.getTime())) {
               perItemEstimates.push(date);
-              // store per-item ETA on the snapshot (optional but useful)
               it.estimatedDelivery = date;
             }
           }
         } catch (e) {
-          // ignore individual product estimator errors — preserve order creation
           console.warn(`estimateDeliveryTo failed for product ${prod._id}:`, e && e.message);
         }
       }
 
-      // Aggregate: choose latest date so order ETA covers all items.
       let estimatedDelivery = null;
       if (perItemEstimates.length > 0) {
         estimatedDelivery = new Date(Math.max(...perItemEstimates.map(d => d.getTime())));
       } else {
-        // fallback default (5 days)
         estimatedDelivery = new Date(Date.now() + 5 * 24 * 60 * 60 * 1000);
       }
 
-      // 5) Create order doc (inside same transaction) with statusHistory and ETA
+      // 5) Create order doc
       const now = new Date();
-      const initialStatus = "ordered"; // set to 'ordered' to reflect placed order
+      const initialStatus = "ordered"; 
       const orderDoc = new Order({
         sellerId: sellerId,
-        userId: userId, // IMPORTANT: Link the order to the Retailer (buyer)
+        userId: userId, 
         customer,
         items: orderItems,
         subtotal,
@@ -158,7 +130,6 @@ export default class OrderService {
       } catch (_) {}
       session.endSession();
 
-      // Map inventory error to domain-level InsufficientStockError
       if (err && (err.name === "InsufficientStockError" || err instanceof InvInsufficientStockError)) {
         throw new InsufficientStockError(err.message);
       }
@@ -168,37 +139,27 @@ export default class OrderService {
 
   /**
    * Internal helper: Transfers stock to the Retailer's inventory when their B2B order is delivered.
-   * * @private
-   * @param {Object} order - The order document
-   * @param {mongoose.ClientSession} session
    */
   static async _transferStockToRetailer(order, session) {
-    // 1. Check if the buyer (userId) is actually a Retailer
-    if (!order.userId) return; // Normal customer order, no stock transfer needed
+    if (!order.userId) return; 
     const buyer = await User.findById(order.userId).session(session);
-    if (!buyer || buyer.role !== "RETAILER") return; // Only transfer stock for Retailers
+    if (!buyer || buyer.role !== "RETAILER") return; 
 
-    // 2. For each item in the order, add it to the Retailer's inventory
     for (const item of order.items) {
-      // Check if Retailer already has a listing for this wholesale product
       let retailerProduct = await Product.findOne({
         ownerId: buyer._id,
         wholesaleSourceId: item.productId
       }).session(session);
 
       if (retailerProduct) {
-        // A. Product exists -> Increase stock for that size
         const sizeIndex = retailerProduct.sizes.findIndex(s => s.size === item.sizeLabel);
-        
         if (sizeIndex > -1) {
-          // Size exists, increment stock
           await Product.updateOne(
             { _id: retailerProduct._id, "sizes.size": item.sizeLabel },
             { $inc: { "sizes.$.stock": item.qty } },
             { session }
           );
         } else {
-          // Size doesn't exist, push new size to array
           await Product.updateOne(
             { _id: retailerProduct._id },
             { $push: { sizes: { size: item.sizeLabel, stock: item.qty, sku: `${retailerProduct.slug}-${item.sizeLabel}` } } },
@@ -206,43 +167,32 @@ export default class OrderService {
           );
         }
       } else {
-        // B. Product doesn't exist -> Create it (Copy from Wholesaler)
         const wholesaleProduct = await Product.findById(item.productId).session(session);
         if (!wholesaleProduct) continue; 
 
         const newProductData = {
           ...wholesaleProduct.toObject(),
-          _id: new mongoose.Types.ObjectId(), // New ID
+          _id: new mongoose.Types.ObjectId(),
           ownerId: buyer._id,
           wholesaleSourceId: wholesaleProduct._id,
           isPublished: false,
-          // Set initial stock only for the ordered size
           sizes: [{ 
             size: item.sizeLabel, 
             stock: item.qty, 
             sku: `${wholesaleProduct.slug}-${item.sizeLabel}` 
           }],
           totalStock: item.qty,
-          price: wholesaleProduct.price * 1.2, // Default markup 20% (Retailer can change later)
+          price: wholesaleProduct.price * 1.2, 
           createdAt: new Date(),
           updatedAt: new Date(),
           __v: 0
         };
         
-        // Create the product inside the session
         await Product.create([newProductData], { session });
       }
     }
   }
 
-  /**
-   * List orders with optional userId filter and pagination.
-   * @param {Object} opts
-   * @param {String} [opts.userId]
-   * @param {number} [opts.page=1]
-   * @param {number} [opts.limit=20]
-   * @returns {Promise<{items:Object[], total:number, page:number, limit:number}>}
-   */
   static async listOrders({ userId, page = 1, limit = 20 } = {}) {
     const filter = {};
     if (userId) filter.userId = userId;
@@ -252,56 +202,25 @@ export default class OrderService {
     return { items, total, page: Number(page), limit: Number(limit) };
   }
 
-  /**
-   * Get a single order by id.
-   * @param {String} id - Order ObjectId/string
-   * @returns {Promise<Object|null>}
-   */
   static async getById(id) {
     if (!id) throw new InvalidOrderParamsError("Order id is required");
     const doc = await Order.findById(id).lean();
     return doc || null;
   }
 
-  /**
-   * Internal helper: restore stock for an order's items inside a session.
-   * If a product size doesn't exist, it will be created with the restored qty.
-   *
-   * @private
-   * @param {Object[]} items - order items array (having productId, sizeLabel, qty)
-   * @param {mongoose.ClientSession} session
-   */
   static async _restoreStockForItems(items = [], session) {
     if (!Array.isArray(items) || items.length === 0) return;
     if (!session) throw new InvalidOrderParamsError("A mongoose session is required for restore");
 
-    // For each item: attempt increaseStock; if increaseStock returns false (size missing) use addOrCreateSize then increaseStock
     for (const it of items) {
-      const productId = it.productId;
-      const sizeLabel = it.sizeLabel;
-      const qty = it.qty;
-
-      // attempt to increase (if size exists)
-      const increased = await InventoryService.increaseStock(productId, sizeLabel, qty, session);
+      const increased = await InventoryService.increaseStock(it.productId, it.sizeLabel, it.qty, session);
       if (!increased) {
-        // ensure size exists and set stock (preserve existing behavior)
-        await InventoryService.addOrCreateSize(productId, sizeLabel, qty, session);
+        await InventoryService.addOrCreateSize(it.productId, it.sizeLabel, it.qty, session);
       }
     }
   }
 
-  /**
-   * Update the status of an order. Optionally restore stock when transitioning to cancelled/refunded.
-   *
-   * This method now appends a statusHistory entry automatically for every transition.
-   *
-   * @param {String} id - order id
-   * @param {String} newStatus - one of orderSchema enum statuses
-   * @param {Object} [opts]
-   * @param {Boolean} [opts.restoreStock=false] - when true and transitioning to cancelled/refunded, restores stock
-   * @returns {Promise<Object>} updated order document
-   * @throws {OrderError|InsufficientStockError|Error}
-   */
+  // --- THIS IS THE FIXED METHOD (Auto-Creates Delivery with Valid Enums) ---
   static async updateStatus(id, newStatus, { restoreStock = false } = {}) {
     if (!id) throw new InvalidOrderParamsError("Order id is required");
     if (!newStatus || typeof newStatus !== "string") throw new InvalidOrderParamsError("newStatus is required");
@@ -319,20 +238,19 @@ export default class OrderService {
       if (!order) throw new OrderError("Order not found");
 
       const prevStatus = order.status;
+      const now = new Date();
 
-      // restore stock if requested and moving to cancelled/refunded
-      const shouldRestore = restoreStock && (newStatus === "cancelled" || newStatus === "refunded");
-      if (shouldRestore) {
+      // Restore stock if cancelled
+      if (restoreStock && (newStatus === "cancelled" || newStatus === "refunded")) {
         await OrderService._restoreStockForItems(order.items, session);
       }
 
-      // --- NEW: Trigger Stock Transfer on Delivery (for B2B) ---
+      // --- Trigger Stock Transfer on Delivery (for B2B) ---
       if (newStatus === "delivered" && prevStatus !== "delivered") {
          await OrderService._transferStockToRetailer(order, session);
       }
 
-      // set status and append to statusHistory
-      const now = new Date();
+      // Update status
       order.status = newStatus;
       order.statusHistory = order.statusHistory || [];
       order.statusHistory.push({
@@ -341,24 +259,64 @@ export default class OrderService {
         note: `Status changed from ${prevStatus} to ${newStatus}`
       });
 
-      // Set fulfillment/top-level timestamps where relevant
+      // --- AUTO-CREATE DELIVERY LOGIC ---
       if (newStatus === "shipped") {
+        order.shippedAt = now;
         order.fulfillment = order.fulfillment || {};
-        order.fulfillment.shippedAt = order.fulfillment.shippedAt || now;
-        order.shippedAt = order.shippedAt || now;
-      } else if (newStatus === "out_for_delivery") {
+        order.fulfillment.shippedAt = now;
+        
+        // --- LOGIC FIX STARTS HERE ---
+        // Detect if this is a B2B order (Wholesaler -> Retailer) or B2C (Retailer -> Customer)
+        // B2B orders usually have a 'userId' field linking to the Retailer account.
+        const isB2B = !!order.userId; 
+
+        const fromType = isB2B ? "WHOLESALER" : "RETAILER";
+        const toType = isB2B ? "RETAILER" : "CUSTOMER";
+        
+        // For B2B, the "Customer Name" in dropoff should be the Retailer's name
+        // The existing order.customer object should already contain the correct destination info
+        // -----------------------------
+
+        const existingDelivery = await Delivery.findOne({ orderRef: order._id }).session(session);
+        
+        if (!existingDelivery) {
+            await Delivery.create([{
+                orderRef: order._id,
+                externalOrderId: order._id.toString(),
+                fromType: fromType, // <--- Uses dynamic type
+                toType: toType,     // <--- Uses dynamic type
+                pickup: { 
+                    address: "Seller Warehouse", 
+                    name: "Seller Store"
+                },
+                dropoff: {
+                    name: order.customer.name,
+                    phone: order.customer.phone,
+                    email: order.customer.email,
+                    address: order.customer.address
+                },
+                status: "PENDING", 
+                notes: "Auto-generated from Order Shipped status",
+                deliveryFee: (order.total || 0) * 0.05,
+                total: order.total || 0,
+                items: order.items.map(i => i.name)
+            }], { session });
+        }
+      }
+
+      if (newStatus === "out_for_delivery") {
+        order.outForDeliveryAt = now;
         order.fulfillment = order.fulfillment || {};
-        order.fulfillment.outForDeliveryAt = order.fulfillment.outForDeliveryAt || now;
-        order.outForDeliveryAt = order.outForDeliveryAt || now;
-      } else if (newStatus === "delivered") {
+        order.fulfillment.outForDeliveryAt = now;
+      } 
+      else if (newStatus === "delivered") {
+        order.deliveredAt = now;
         order.fulfillment = order.fulfillment || {};
-        order.fulfillment.deliveredAt = order.fulfillment.deliveredAt || now;
-        order.deliveredAt = order.deliveredAt || now;
-      } else if (newStatus === "refunded") {
+        order.fulfillment.deliveredAt = now;
+      } 
+      else if (newStatus === "refunded") {
         order.payment = order.payment || {};
-        order.payment.refundedAt = order.payment.refundedAt || now;
-        order.payment.refundInfo = order.payment.refundInfo || {};
-        // keep meta/refund trace as well
+        order.payment.refundedAt = now;
         order.meta = order.meta || {};
         order.meta.refund = Object.assign({}, order.meta.refund || {}, { at: now });
       }
@@ -382,24 +340,6 @@ export default class OrderService {
     }
   }
 
-  /**
-   * Process a refund for an order id.
-   *
-   * Behavior:
-   * - marks order.status = 'refunded'
-   * - optionally restores stock (default true)
-   * - records refund metadata in payment.refundInfo and meta.refund
-   *
-   * NOTE: actual payment-provider refund must be orchestrated outside or before calling this,
-   * this method only reflects refund in DB and inventory.
-   *
-   * @param {String} id - order id
-   * @param {Object} [opts]
-   * @param {Boolean} [opts.restoreStock=true]
-   * @param {Object} [opts.refundInfo] - arbitrary refund metadata (provider, refundId, amount, note)
-   * @returns {Promise<Object>} updated order document
-   * @throws {OrderError|InsufficientStockError|Error}
-   */
   static async refundOrder(id, { restoreStock = true, refundInfo = {} } = {}) {
     if (!id) throw new InvalidOrderParamsError("Order id is required");
 
@@ -411,18 +351,15 @@ export default class OrderService {
       if (!order) throw new OrderError("Order not found");
 
       if (order.status === "refunded") {
-        // already refunded; nothing to do
         await session.commitTransaction();
         session.endSession();
         return order;
       }
 
-      // Restore stock before marking refunded
       if (restoreStock) {
         await OrderService._restoreStockForItems(order.items, session);
       }
 
-      // Mark payment/refund metadata and status
       const now = new Date();
       order.status = "refunded";
       order.statusHistory = order.statusHistory || [];
@@ -434,9 +371,8 @@ export default class OrderService {
 
       order.payment = order.payment || {};
       order.payment.refundInfo = Object.assign({}, order.payment.refundInfo || {}, refundInfo);
-      order.payment.refundedAt = order.payment.refundedAt || now;
+      order.payment.refundedAt = now;
 
-      // also keep refund trace in meta
       order.meta = order.meta || {};
       order.meta.refund = Object.assign({}, order.meta.refund || {}, { at: now, info: refundInfo });
 

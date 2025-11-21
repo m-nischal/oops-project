@@ -1,6 +1,7 @@
-// src/pages/delivery/login.js
+// /mnt/data/oops-project/src/pages/delivery/login.js
 import { useState } from "react";
 import { useRouter } from "next/router";
+import Link from "next/link";
 
 export default function DeliveryLoginPage() {
   const [email, setEmail] = useState("");
@@ -38,8 +39,11 @@ export default function DeliveryLoginPage() {
         } catch (e) {}
       }
       if (!role && data.user?.role) role = data.user.role.toUpperCase();
-      if (role === "DELIVERY") router.replace("/delivery/assigned");
-      else setError("This account is not a Delivery Partner.");
+      if (role === "DELIVERY") {
+        router.replace("/delivery/assigned");
+      } else {
+        setError("This account is not a Delivery Partner.");
+      }
     } catch (err) {
       console.error(err);
       setError("Network error");
@@ -49,14 +53,64 @@ export default function DeliveryLoginPage() {
   }
 
   return (
-    <div style={{ padding: 24 }}>
-      <h2>Delivery Partner Login</h2>
-      <form onSubmit={onSubmit}>
-        <input value={email} onChange={(e)=>setEmail(e.target.value)} placeholder="Email" required />
-        <input value={password} onChange={(e)=>setPassword(e.target.value)} placeholder="Password" type="password" required />
-        {error && <div style={{ color: "red", marginTop: 8 }}>{error}</div>}
-        <button type="submit" disabled={loading} style={{ marginTop: 8 }}>{loading ? "Signing in…" : "Login"}</button>
-      </form>
+    <div className="min-h-screen bg-gray-50 flex items-center justify-center px-4 py-12">
+      <div className="w-full max-w-md bg-white rounded-2xl shadow-lg p-8">
+        <div className="text-center mb-6">
+          <h1 className="text-2xl font-semibold tracking-tight">Delivery Partner Login</h1>
+          <p className="text-sm text-gray-500 mt-1">Sign in to view and manage your assigned deliveries</p>
+        </div>
+
+        <form onSubmit={onSubmit} className="space-y-4" aria-label="Delivery login form">
+          <label className="block">
+            <span className="text-xs font-medium text-gray-700">Email</span>
+            <input
+              type="email"
+              name="email"
+              autoComplete="email"
+              required
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              className="mt-2 block w-full rounded-xl border px-4 py-2 focus:outline-none focus:ring-2 focus:ring-black"
+              placeholder="you@company.com"
+            />
+          </label>
+
+          <label className="block">
+            <span className="text-xs font-medium text-gray-700">Password</span>
+            <input
+              type="password"
+              name="password"
+              autoComplete="current-password"
+              required
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              className="mt-2 block w-full rounded-xl border px-4 py-2 focus:outline-none focus:ring-2 focus:ring-black"
+              placeholder="••••••••"
+            />
+          </label>
+
+          {error && (
+            <div role="alert" className="text-sm text-red-600 mt-1">
+              {error}
+            </div>
+          )}
+
+          <button
+            type="submit"
+            disabled={loading}
+            className="w-full mt-2 py-3 rounded-xl bg-black text-white font-medium disabled:opacity-60"
+          >
+            {loading ? "Signing in…" : "Sign in"}
+          </button>
+        </form>
+
+        <div className="text-center mt-6 text-sm text-gray-500">
+          Don't have an account?{' '}
+          <Link href="/delivery/register" className="font-bold text-black hover:underline">
+            Register here
+          </Link>
+        </div>
+      </div>
     </div>
   );
 }

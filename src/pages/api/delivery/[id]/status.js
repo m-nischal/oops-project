@@ -3,10 +3,13 @@ import dbConnect from "../../../../lib/dbConnect.js";
 import Delivery from "../../../../models/deliveryModel.js";
 import { getSessionFromReq } from "../../../../lib/authHelpers.js";
 import { sendEmail } from "../../../../lib/mailer.js";
+import Order from "../../../../models/orderModel.js"; // Import Order Model
+import OrderService from "../../../../services/orderService.js"; // Import Order Service
 
 export default async function handler(req, res) {
   await dbConnect();
   const { id } = req.query;
+
   if (req.method !== "POST") {
     res.setHeader("Allow", ["POST"]);
     return res.status(405).json({ ok: false, error: "Method Not Allowed" });
@@ -14,67 +17,180 @@ export default async function handler(req, res) {
 
   const session = await getSessionFromReq(req);
   if (!session || !session.user) return res.status(401).json({ ok: false, error: "Not authenticated" });
-  const role = (session.user.role || "").toUpperCase();
-  if (role !== "DELIVERY") return res.status(403).json({ ok: false, error: "Forbidden" });
+  
+  // Role check
+  if ((session.user.role || "").toUpperCase() !== "DELIVERY") {
+      return res.status(403).json({ ok: false, error: "Forbidden" });
+  }
 
-  const { status, note, otp } = req.body;
-  if (!status) return res.status(400).json({ ok: false, error: "status required" });
+  const { status, note, otp } = req.body || {};
+  if (!status) return res.status(400).json({ ok: false, error: "Status is required" });
 
   try {
     const delivery = await Delivery.findById(id);
     if (!delivery) return res.status(404).json({ ok: false, error: "Delivery not found" });
-    if (String(delivery.assignedTo) !== String(session.user._id)) return res.status(403).json({ ok: false, error: "Not assigned to you" });
+    
+    if (String(delivery.assignedTo) !== String(session.user._id)) {
+        return res.status(403).json({ ok: false, error: "Not assigned to you" });
+    }
 
     const now = new Date();
+    delivery.timestamps = delivery.timestamps || {};
+    delivery.history = Array.isArray(delivery.history) ? delivery.history : [];
+
+    // --- STATUS LOGIC ---
 
     if (status === "PICKED_UP") {
-      delivery.status = "PICKED_UP";
+      delivery.status = "PICKED_UP"; // or "IN_TRANSIT" depending on your flow preferences
       delivery.timestamps.pickedAt = now;
-      delivery.history.push({ status: "PICKED_UP", by: session.user._id, note: note || "" });
+      
+      // Ensure OTP exists for the next step
+      if (!delivery.deliveryOtp) {
+        delivery.deliveryOtp = String(Math.floor(1000 + Math.random() * 9000)); // 4-digit OTP
+      }
+      
+      delivery.history.push({ status: "PICKED_UP", by: session.user._id, note, at: now });
 
     } else if (status === "OUT_FOR_DELIVERY") {
       delivery.status = "OUT_FOR_DELIVERY";
       delivery.timestamps.outForDeliveryAt = now;
-      delivery.history.push({ status: "OUT_FOR_DELIVERY", by: session.user._id, note: note || "" });
+      delivery.history.push({ status: "OUT_FOR_DELIVERY", by: session.user._id, note: note || "", at: now });
 
-      // ensure OTP exists (or generate)
+      // 2. Generate OTP if it doesn't exist
       if (!delivery.deliveryOtp) {
-        delivery.deliveryOtp = String(Math.floor(100000 + Math.random() * 900000));
+        delivery.deliveryOtp = String(Math.floor(100000 + Math.random() * 900000)); // 6 digit OTP
       }
 
-      // send OTP to recipient email if present
+      // 3. Send Email
       if (delivery.dropoff?.email) {
         try {
           await sendEmail({
             to: delivery.dropoff.email,
-            subject: `Your delivery is out for delivery — OTP`,
-            text: `Your delivery (${delivery.externalOrderId || delivery._id}) is out for delivery. OTP: ${delivery.deliveryOtp}`
+            subject: `Your LiveMart Order is Out for Delivery 🚚`,
+            text: `Your order is on its way! Please share this OTP with your delivery partner: ${delivery.deliveryOtp}`,
+            html: `
+              <div style="font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; background-color: #ffffff; border: 1px solid #e0e0e0; border-radius: 8px;">
+                <div style="text-align: center; padding-bottom: 20px; border-bottom: 1px solid #f0f0f0;">
+                  <h2 style="color: #333; margin: 0;">Out for Delivery</h2>
+                </div>
+                <div style="padding: 30px 0; text-align: center;">
+                  <p style="font-size: 16px; color: #555; line-height: 1.5; margin-bottom: 20px;">
+                    Good news! Your LiveMart order is on its way to you.
+                  </p>
+                  <p style="font-size: 16px; color: #555; margin-bottom: 25px;">
+                    Please share the following One-Time Password (OTP) with your delivery partner to confirm receipt:
+                  </p>
+                  <div style="background-color: #f8f9fa; padding: 15px 30px; border-radius: 6px; display: inline-block; border: 1px dashed #ccc;">
+                    <span style="font-size: 32px; font-weight: bold; letter-spacing: 5px; color: #000;">
+                      ${delivery.deliveryOtp}
+                    </span>
+                  </div>
+                  <p style="font-size: 14px; color: #888; margin-top: 25px;">
+                    For your security, please do not share this code with anyone else.
+                  </p>
+                </div>
+                <div style="text-align: center; padding-top: 20px; border-top: 1px solid #f0f0f0; color: #999; font-size: 12px;">
+                  &copy; ${new Date().getFullYear()} LiveMart. All rights reserved.
+                </div>
+              </div>
+            `
           });
         } catch (e) {
-          console.warn("Failed to send OTP email:", e.message);
+          console.warn("Failed to send OTP email:", e?.message || e);
+          // We don't return error here so the status update still succeeds even if email fails
         }
       }
-
+    
     } else if (status === "DELIVERED") {
-      // require OTP match
-      if (!otp) return res.status(400).json({ ok: false, error: "OTP required" });
-      if (String(otp) !== String(delivery.deliveryOtp)) return res.status(400).json({ ok: false, error: "Invalid OTP" });
+
+      if (delivery.status === "DELIVERED") {
+          return res.json({ ok: true, delivery });
+      }
+      // --- OTP VERIFICATION ---
+      if (!otp) return res.status(400).json({ ok: false, error: "Delivery OTP is required" });
+      
+      // Strict string comparison
+      if (String(otp).trim() !== String(delivery.deliveryOtp).trim()) {
+          return res.status(400).json({ ok: false, error: "Invalid OTP. Please ask the customer again." });
+      }
 
       delivery.status = "DELIVERED";
       delivery.timestamps.deliveredAt = now;
-      delivery.history.push({ status: "DELIVERED", by: session.user._id, note: note || "" });
-      // clear otp for safety
-      delivery.deliveryOtp = null;
-    } else {
-      // other statuses allowed? set directly
-      delivery.status = status;
-      delivery.history.push({ status, by: session.user._id, note: note || "" });
+      delivery.deliveryOtp = null; // Clear OTP after use
+      
+      delivery.history.push({ status: "DELIVERED", by: session.user._id, note, at: now });
+    }
+    // ... existing code ...
+    
+    await delivery.save();
+
+    // --- NEW: Sync status with Parent Order ---
+    if (delivery.orderRef) {
+      let orderStatus = null;
+      // Map Delivery status to Order status
+      if (status === "OUT_FOR_DELIVERY") orderStatus = "out_for_delivery";
+      if (status === "DELIVERED") orderStatus = "delivered";
+
+      if (orderStatus) {
+        try {
+          // Use OrderService to update the main order (handles timestamps, history, etc.)
+          await OrderService.updateStatus(delivery.orderRef, orderStatus);
+        } catch (syncErr) {
+          console.error("Failed to sync order status:", syncErr);
+          // We don't throw here so the delivery update itself remains successful
+        }
+      }
     }
 
-    await delivery.save();
-    return res.json({ ok: true, delivery });
+    // --- NEW: Send Final Delivery Confirmation Email ---
+    if (status === "DELIVERED" && delivery.dropoff?.email) {
+      try {
+        await sendEmail({
+          to: delivery.dropoff.email,
+          subject: `Your LiveMart Order Has Been Delivered ✅`,
+          text: `Your order has been successfully delivered. Thank you for shopping with LiveMart!`,
+          html: `
+            <div style="font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; background-color: #ffffff; border: 1px solid #e0e0e0; border-radius: 8px;">
+              <div style="text-align: center; padding-bottom: 20px; border-bottom: 1px solid #f0f0f0;">
+                <h2 style="color: #28a745; margin: 0;">Order Delivered!</h2>
+              </div>
+              <div style="padding: 30px 0; text-align: center;">
+                <p style="font-size: 16px; color: #555; line-height: 1.5;">
+                  Your package has been successfully delivered to:
+                </p>
+                <p style="font-weight: bold; color: #333; margin: 10px 0 20px 0;">
+                  ${delivery.dropoff.address}
+                </p>
+                <div style="margin: 20px 0;">
+                  <a href="${process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}/orders" style="background-color: #000; color: #fff; padding: 12px 24px; text-decoration: none; border-radius: 5px; font-size: 14px;">View Order Details</a>
+                </div>
+                <p style="font-size: 14px; color: #777; margin-top: 30px;">
+                  Thank you for shopping with LiveMart. We hope to see you again soon!
+                </p>
+              </div>
+              <div style="text-align: center; padding-top: 20px; border-top: 1px solid #f0f0f0; color: #999; font-size: 12px;">
+                &copy; ${new Date().getFullYear()} LiveMart. All rights reserved.
+              </div>
+            </div>
+          `
+        });
+      } catch (emailErr) {
+        console.warn("Failed to send delivery confirmation email:", emailErr);
+      }
+    }
+
+    return res.json({ 
+    // ... existing return ...
+        ok: true, 
+        delivery: {
+            ...delivery.toObject(),
+            id: delivery._id,
+            estimatedEarnings: delivery.deliveryFee || delivery.earnings || 0
+        } 
+    });
+
   } catch (err) {
-    console.error("status error:", err);
+    console.error("Status update error:", err);
     return res.status(500).json({ ok: false, error: "Server error" });
   }
 }

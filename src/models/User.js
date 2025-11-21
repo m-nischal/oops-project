@@ -41,7 +41,7 @@ const userSchema = new mongoose.Schema({
   oauthProvider: String,
   oauthId: String,
   phone: { type: String },
-  role: { type: String, enum: ["CUSTOMER","RETAILER","WHOLESALER"], default: "CUSTOMER" },
+  role: { type: String, enum: ["CUSTOMER","RETAILER","WHOLESALER","DELIVERY"], default: "CUSTOMER" },
   verified: { type: Boolean, default: false },
   otp: {
     code: String,
