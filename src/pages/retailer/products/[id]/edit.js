@@ -1,45 +1,149 @@
 // src/pages/retailer/products/[id]/edit.js
-import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { useRouter } from 'next/router';
-import RetailerLayout from '../../../../components/RetailerLayout';
-import TagsInput from '../../../../components/TagsInput';
-import { useAuthGuard } from '../../../../hooks/useAuthGuard';
+import React, {
+  useState,
+  useEffect,
+  useCallback,
+  useMemo,
+  useRef,
+} from "react";
+import { useRouter } from "next/router";
+import RetailerLayout from "../../../../components/RetailerLayout";
+import TagsInput from "../../../../components/TagsInput";
+import { useAuthGuard } from "../../../../hooks/useAuthGuard";
 // import LocationPicker from '../../../../components/LocationPicker'; // no longer used
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+  CardDescription,
+} from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Separator } from "@/components/ui/separator";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { AlertTriangle, Loader2, Trash2, Upload, X, Lock, MapPin, User, LocateFixed, Globe as GlobeIcon, Phone as PhoneIcon, Check } from "lucide-react";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
+  AlertTriangle,
+  Loader2,
+  Trash2,
+  Upload,
+  X,
+  Lock,
+  MapPin,
+  User,
+  LocateFixed,
+  Globe as GlobeIcon,
+  Phone as PhoneIcon,
+  Check,
+} from "lucide-react";
 
 // MAP/PLACES IMPORTS
 import { GoogleMap, useLoadScript, Marker } from "@react-google-maps/api";
-import usePlacesAutocomplete, { getGeocode, getLatLng } from "use-places-autocomplete";
+import usePlacesAutocomplete, {
+  getGeocode,
+  getLatLng,
+} from "use-places-autocomplete";
 
 const libraries = ["places"];
 
 // --- COUNTRY DATA: LIMITED TO INDIAN SUBCONTINENT ---
 const COUNTRY_DATA = [
-  { country: "Afghanistan", code: "+93", flag: "🇦🇫", lat: 33.9391, lng: 67.7099, iso2: "AF" },
-  { country: "Bangladesh", code: "+880", flag: "🇧🇩", lat: 23.685, lng: 90.3563, iso2: "BD" },
-  { country: "Bhutan", code: "+975", flag: "🇧🇹", lat: 27.5142, lng: 90.4336, iso2: "BT" },
-  { country: "India", code: "+91", flag: "🇮🇳", lat: 20.5937, lng: 78.9629, iso2: "IN" },
-  { country: "Maldives", code: "+960", flag: "🇲🇻", lat: 3.2028, lng: 73.2207, iso2: "MV" },
-  { country: "Nepal", code: "+977", flag: "🇳🇵", lat: 28.3949, lng: 84.124, iso2: "NP" },
-  { country: "Pakistan", code: "+92", flag: "🇵🇰", lat: 30.3753, lng: 69.3451, iso2: "PK" },
-  { country: "Sri Lanka", code: "+94", flag: "🇱🇰", lat: 7.8731, lng: 80.7718, iso2: "LK" },
+  {
+    country: "Afghanistan",
+    code: "+93",
+    flag: "🇦🇫",
+    lat: 33.9391,
+    lng: 67.7099,
+    iso2: "AF",
+  },
+  {
+    country: "Bangladesh",
+    code: "+880",
+    flag: "🇧🇩",
+    lat: 23.685,
+    lng: 90.3563,
+    iso2: "BD",
+  },
+  {
+    country: "Bhutan",
+    code: "+975",
+    flag: "🇧🇹",
+    lat: 27.5142,
+    lng: 90.4336,
+    iso2: "BT",
+  },
+  {
+    country: "India",
+    code: "+91",
+    flag: "🇮🇳",
+    lat: 20.5937,
+    lng: 78.9629,
+    iso2: "IN",
+  },
+  {
+    country: "Maldives",
+    code: "+960",
+    flag: "🇲🇻",
+    lat: 3.2028,
+    lng: 73.2207,
+    iso2: "MV",
+  },
+  {
+    country: "Nepal",
+    code: "+977",
+    flag: "🇳🇵",
+    lat: 28.3949,
+    lng: 84.124,
+    iso2: "NP",
+  },
+  {
+    country: "Pakistan",
+    code: "+92",
+    flag: "🇵🇰",
+    lat: 30.3753,
+    lng: 69.3451,
+    iso2: "PK",
+  },
+  {
+    country: "Sri Lanka",
+    code: "+94",
+    flag: "🇱🇰",
+    lat: 7.8731,
+    lng: 80.7718,
+    iso2: "LK",
+  },
 ].sort((a, b) => a.country.localeCompare(b.country));
 
 // --- Helper to decode user info from token ---
 function getUserInfoFromToken() {
   if (typeof window === "undefined")
-    return { id: null, email: null, name: null, phone: null, isLoggedIn: false };
+    return {
+      id: null,
+      email: null,
+      name: null,
+      phone: null,
+      isLoggedIn: false,
+    };
   const token = localStorage.getItem("token");
-  if (!token) return { id: null, email: null, name: null, phone: null, isLoggedIn: false };
+  if (!token)
+    return {
+      id: null,
+      email: null,
+      name: null,
+      phone: null,
+      isLoggedIn: false,
+    };
   try {
     const payload = JSON.parse(atob(token.split(".")[1]));
     return {
@@ -50,7 +154,13 @@ function getUserInfoFromToken() {
       isLoggedIn: true,
     };
   } catch (e) {
-    return { id: null, email: null, name: null, phone: null, isLoggedIn: false };
+    return {
+      id: null,
+      email: null,
+      name: null,
+      phone: null,
+      isLoggedIn: false,
+    };
   }
 }
 
@@ -73,10 +183,11 @@ export default function EditProductPage() {
   const [userDetails, setUserDetails] = useState(getUserInfoFromToken());
 
   // Form State
-  const [name, setName] = useState('');
-  const [description, setDescription] = useState('');
-  const [price, setPrice] = useState('');
-  const [brand, setBrand] = useState('');
+  const [name, setName] = useState("");
+  const [description, setDescription] = useState("");
+  const [price, setPrice] = useState("");
+  const [discount, setDiscount] = useState("");
+  const [brand, setBrand] = useState("");
   const [tags, setTags] = useState([]);
 
   // Address/Location State
@@ -93,21 +204,24 @@ export default function EditProductPage() {
   const [sizeChartFile, setSizeChartFile] = useState(null);
   const [sizeChartPreview, setSizeChartPreview] = useState(null);
   const [existingSizeChart, setExistingSizeChart] = useState(null);
-  const [sizeChartName, setSizeChartName] = useState('');
+  const [sizeChartName, setSizeChartName] = useState("");
   const [isPublished, setIsPublished] = useState(false);
 
   // Helper to map user address fields to product warehouse fields
   const mapAddressToWarehouse = useCallback((address) => {
-    if (!address || !address.location || !address.location.coordinates) return null;
+    if (!address || !address.location || !address.location.coordinates)
+      return null;
     return {
-      address: `${address.label}: ${address.addressLine1} ${address.addressLine2 || ''}`,
+      address: `${address.label}: ${address.addressLine1} ${
+        address.addressLine2 || ""
+      }`,
       location: {
-        type: 'Point',
-        coordinates: address.location.coordinates
+        type: "Point",
+        coordinates: address.location.coordinates,
       },
       city: address.city,
       state: address.state,
-      country: address.country
+      country: address.country,
     };
   }, []);
 
@@ -118,11 +232,14 @@ export default function EditProductPage() {
     const [lng, lat] = productWarehouse.location?.coordinates || [0, 0];
     if (lng === 0 && lat === 0) return null;
 
-    const match = addresses.find(addr => {
+    const match = addresses.find((addr) => {
       const [addrLng, addrLat] = addr.location?.coordinates || [null, null];
-      return addrLng != null && addrLat != null &&
+      return (
+        addrLng != null &&
+        addrLat != null &&
         Math.round(addrLat * 1000) === Math.round(lat * 1000) &&
-        Math.round(addrLng * 1000) === Math.round(lng * 1000);
+        Math.round(addrLng * 1000) === Math.round(lng * 1000)
+      );
     });
 
     return match ? match._id.toString() : null;
@@ -157,7 +274,9 @@ export default function EditProductPage() {
         setUserAddresses(updatedUser.addresses);
 
         const newAddressId =
-          updatedUser.addresses[updatedUser.addresses.length - 1]._id.toString();
+          updatedUser.addresses[
+            updatedUser.addresses.length - 1
+          ]._id.toString();
 
         setSelectedAddressId(newAddressId);
         setLocationData(
@@ -187,11 +306,13 @@ export default function EditProductPage() {
         setIsFetching(false);
         return;
       }
-      const authHeaders = { 'Authorization': `Bearer ${token}` };
+      const authHeaders = { Authorization: `Bearer ${token}` };
 
       try {
         // 1. Fetch Product Data
-        const productRes = await fetch(`/api/retailer/products/${productId}`, { headers: authHeaders });
+        const productRes = await fetch(`/api/retailer/products/${productId}`, {
+          headers: authHeaders,
+        });
         if (!productRes.ok) {
           const errData = await productRes.json();
           throw new Error(errData.error || "Failed to fetch product data.");
@@ -199,8 +320,11 @@ export default function EditProductPage() {
         const { product } = await productRes.json();
 
         // 2. Fetch User Addresses
-        const addressesRes = await fetch('/api/user/profile', { headers: authHeaders });
-        if (!addressesRes.ok) throw new Error('Failed to fetch user addresses.');
+        const addressesRes = await fetch("/api/user/profile", {
+          headers: authHeaders,
+        });
+        if (!addressesRes.ok)
+          throw new Error("Failed to fetch user addresses.");
         const { user } = await addressesRes.json();
         const addresses = user.addresses || [];
         setUserAddresses(addresses);
@@ -208,19 +332,20 @@ export default function EditProductPage() {
         setAddressesLoading(false);
 
         // Populate standard fields
-        setName(product.name || '');
-        setDescription(product.description || '');
-        setPrice(product.price?.toString() || '');
-        setBrand(product.brand || '');
+        setName(product.name || "");
+        setDescription(product.description || "");
+        setPrice(product.price?.toString() || "");
+        setDiscount(product.discount?.toString() || "0");
+        setBrand(product.brand || "");
         setTags(product.tags || []);
 
         // Sizes
-        const loadedSizes = product.sizes || [{ size: 'S', sku: '', stock: 0 }];
+        const loadedSizes = product.sizes || [{ size: "S", sku: "", stock: 0 }];
         setSizes(loadedSizes);
         setOriginalSizes(JSON.parse(JSON.stringify(loadedSizes)));
 
         setExistingImages(product.images || []);
-        setSizeChartName(product.sizeChart?.chartName || '');
+        setSizeChartName(product.sizeChart?.chartName || "");
         setExistingSizeChart(product.sizeChart?.image || null);
         setIsPublished(product.isPublished || false);
 
@@ -233,13 +358,13 @@ export default function EditProductPage() {
           if (matchId) {
             setSelectedAddressId(matchId);
           } else {
-            setSelectedAddressId('choose');
+            setSelectedAddressId("choose");
           }
         } else if (addresses.length > 0) {
           setSelectedAddressId(addresses[0]._id.toString());
           setLocationData(mapAddressToWarehouse(addresses[0]));
         } else {
-          setSelectedAddressId('choose');
+          setSelectedAddressId("choose");
           setLocationData(null);
         }
       } catch (err) {
@@ -259,7 +384,9 @@ export default function EditProductPage() {
     setSelectedAddressId(addressId);
     setError(null);
 
-    const selected = userAddresses.find(addr => addr._id.toString() === addressId);
+    const selected = userAddresses.find(
+      (addr) => addr._id.toString() === addressId
+    );
     if (selected) {
       setLocationData(mapAddressToWarehouse(selected));
     } else {
@@ -272,12 +399,14 @@ export default function EditProductPage() {
   const handleSizeChange = (index, field, value) => {
     const newSizes = [...sizes];
 
-    if (field === 'stock') {
+    if (field === "stock") {
       const newStock = Number(value);
       const maxStock = originalSizes[index]?.stock || 0;
 
       if (newStock > maxStock) {
-        alert(`You cannot increase stock manually. Max available from inventory is ${maxStock}. Order more from the Wholesaler to increase this.`);
+        alert(
+          `You cannot increase stock manually. Max available from inventory is ${maxStock}. Order more from the Wholesaler to increase this.`
+        );
         return;
       }
       newSizes[index][field] = newStock;
@@ -288,26 +417,26 @@ export default function EditProductPage() {
   };
 
   const removeSize = (index) => {
-    setSizes(prev => prev.filter((_, i) => i !== index));
-    setOriginalSizes(prev => prev.filter((_, i) => i !== index));
+    setSizes((prev) => prev.filter((_, i) => i !== index));
+    setOriginalSizes((prev) => prev.filter((_, i) => i !== index));
   };
 
   // Upload/Image Helpers
   const handleImageChange = (e) => {
     const files = Array.from(e.target.files || []);
     if (files.length === 0) return;
-    setImageFiles(prevFiles => [...prevFiles, ...files]);
-    const newPreviews = files.map(file => URL.createObjectURL(file));
-    setImagePreviews(prevPreviews => [...prevPreviews, ...newPreviews]);
+    setImageFiles((prevFiles) => [...prevFiles, ...files]);
+    const newPreviews = files.map((file) => URL.createObjectURL(file));
+    setImagePreviews((prevPreviews) => [...prevPreviews, ...newPreviews]);
   };
 
   const removeNewImage = (index) => {
-    setImageFiles(prev => prev.filter((_, i) => i !== index));
-    setImagePreviews(prev => prev.filter((_, i) => i !== index));
+    setImageFiles((prev) => prev.filter((_, i) => i !== index));
+    setImagePreviews((prev) => prev.filter((_, i) => i !== index));
   };
 
   const removeExistingImage = (index) => {
-    setExistingImages(prev => prev.filter((_, i) => i !== index));
+    setExistingImages((prev) => prev.filter((_, i) => i !== index));
   };
 
   const handleSizeChartChange = (e) => {
@@ -321,9 +450,14 @@ export default function EditProductPage() {
 
   const uploadFiles = async (fieldName, files) => {
     const formData = new FormData();
-    files.forEach(file => { formData.append(fieldName, file); });
-    const uploadRes = await fetch('/api/upload', { method: 'POST', body: formData });
-    if (!uploadRes.ok) throw new Error('File upload failed');
+    files.forEach((file) => {
+      formData.append(fieldName, file);
+    });
+    const uploadRes = await fetch("/api/upload", {
+      method: "POST",
+      body: formData,
+    });
+    if (!uploadRes.ok) throw new Error("File upload failed");
     return await uploadRes.json();
   };
 
@@ -341,19 +475,19 @@ export default function EditProductPage() {
     setError(null);
 
     let newImageUrls = [];
-    let newSizeChartUrl = '';
+    let newSizeChartUrl = "";
 
     try {
       // Upload new product images (if any)
       if (imageFiles.length > 0) {
-        const uploadData = await uploadFiles('productImages', imageFiles);
+        const uploadData = await uploadFiles("productImages", imageFiles);
         newImageUrls = uploadData.urls?.productImages || [];
       }
 
       // Upload size chart (if changed)
       if (sizeChartFile) {
-        const uploadData = await uploadFiles('productImage', [sizeChartFile]);
-        newSizeChartUrl = uploadData.urls?.productImage?.[0] || '';
+        const uploadData = await uploadFiles("productImage", [sizeChartFile]);
+        newSizeChartUrl = uploadData.urls?.productImage?.[0] || "";
       }
 
       setIsUploading(false);
@@ -363,16 +497,17 @@ export default function EditProductPage() {
         name,
         description,
         price: Number(price),
+        discount: Number(discount) || 0,
         brand,
         images: [...existingImages, ...newImageUrls],
         sizes,
         tags,
         sizeChart: {
           chartName: sizeChartName,
-          image: newSizeChartUrl ? newSizeChartUrl : existingSizeChart
+          image: newSizeChartUrl ? newSizeChartUrl : existingSizeChart,
         },
         warehouses: [locationData],
-        isPublished
+        isPublished,
       };
 
       // PUT Request
@@ -380,22 +515,21 @@ export default function EditProductPage() {
       if (!token) throw new Error("No authorization token found.");
 
       const res = await fetch(`/api/retailer/products/${productId}`, {
-        method: 'PUT',
+        method: "PUT",
         headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify(productData),
       });
 
       if (!res.ok) {
         const errData = await res.json();
-        throw new Error(errData.error || 'Failed to update product');
+        throw new Error(errData.error || "Failed to update product");
       }
 
-      if (isPublished) router.push('/retailer/products');
-      else router.push('/retailer/inventory');
-
+      if (isPublished) router.push("/retailer/products");
+      else router.push("/retailer/inventory");
     } catch (err) {
       console.error(err);
       setError(err.message);
@@ -406,7 +540,7 @@ export default function EditProductPage() {
   };
 
   const currentAddress = locationData;
-
+  const finalPrice = Number(price) - Number(price) * (Number(discount) / 100);
   if (isAuthLoading || isFetching) {
     return (
       <RetailerLayout>
@@ -426,7 +560,7 @@ export default function EditProductPage() {
             <Button
               variant="outline"
               type="button"
-              onClick={() => router.push('/retailer/inventory')}
+              onClick={() => router.push("/retailer/inventory")}
             >
               Cancel
             </Button>
@@ -434,7 +568,11 @@ export default function EditProductPage() {
               {(loading || isUploading) && (
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
               )}
-              {loading ? "Saving..." : (isUploading ? "Uploading..." : "Save Changes")}
+              {loading
+                ? "Saving..."
+                : isUploading
+                ? "Uploading..."
+                : "Save Changes"}
             </Button>
           </div>
         </div>
@@ -473,15 +611,39 @@ export default function EditProductPage() {
                   />
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="price">Price</Label>
-                    <Input
-                      id="price"
-                      type="number"
-                      value={price}
-                      onChange={(e) => setPrice(e.target.value)}
-                      required
-                    />
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div className="space-y-2">
+                      <Label>Selling Price (₹)</Label>
+                      <Input
+                        type="number"
+                        value={price}
+                        onChange={(e) => setPrice(e.target.value)}
+                        required
+                      />
+                    </div>
+
+                    {/* --- NEW DISCOUNT INPUT --- */}
+                    <div className="space-y-2">
+                      <Label>Discount (%)</Label>
+                      <Input
+                        type="number"
+                        value={discount}
+                        onChange={(e) => setDiscount(e.target.value)}
+                        min="0"
+                        max="100"
+                        placeholder="0"
+                      />
+                    </div>
+
+                    {/* --- PREVIEW --- */}
+                    <div className="space-y-2">
+                      <Label className="text-muted-foreground">
+                        Final Customer Price
+                      </Label>
+                      <div className="h-10 px-3 py-2 rounded-md border bg-gray-50 text-green-600 font-bold">
+                        ₹{finalPrice.toLocaleString("en-IN")}
+                      </div>
+                    </div>
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="brand">Brand Name</Label>
@@ -516,7 +678,9 @@ export default function EditProductPage() {
                 ) : (
                   <>
                     <div className="space-y-2">
-                      <Label htmlFor="address-select">Choose Store Address</Label>
+                      <Label htmlFor="address-select">
+                        Choose Store Address
+                      </Label>
 
                       <Button
                         type="button"
@@ -560,7 +724,8 @@ export default function EditProductPage() {
                       <Alert variant="destructive">
                         <AlertTitle>No Location Selected</AlertTitle>
                         <AlertDescription>
-                          Please click the button above to select one of your saved addresses as the store location.
+                          Please click the button above to select one of your
+                          saved addresses as the store location.
                         </AlertDescription>
                       </Alert>
                     )}
@@ -569,7 +734,8 @@ export default function EditProductPage() {
                       <Alert variant="secondary">
                         <AlertTitle>Address Management</AlertTitle>
                         <AlertDescription>
-                          You have no saved addresses. Please use the button above to add your first one.
+                          You have no saved addresses. Please use the button
+                          above to add your first one.
                         </AlertDescription>
                       </Alert>
                     )}
@@ -583,21 +749,31 @@ export default function EditProductPage() {
               <CardHeader>
                 <CardTitle>Size Variants & Stock</CardTitle>
                 <CardDescription className="text-xs text-muted-foreground flex items-center mt-1">
-                  <Lock className="h-3 w-3 mr-1" /> Stock levels cannot be increased. Order from Wholesaler to increase.
+                  <Lock className="h-3 w-3 mr-1" /> Stock levels cannot be
+                  increased. Order from Wholesaler to increase.
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
                 {sizes.map((size, index) => (
-                  <div key={index} className="grid grid-cols-12 gap-2 items-end">
+                  <div
+                    key={index}
+                    className="grid grid-cols-12 gap-2 items-end"
+                  >
                     <div className="col-span-4 space-y-2">
                       <Label>Size</Label>
-                      <Input value={size.size} disabled className="bg-gray-100" />
+                      <Input
+                        value={size.size}
+                        disabled
+                        className="bg-gray-100"
+                      />
                     </div>
                     <div className="col-span-5 space-y-2">
                       <Label>SKU</Label>
                       <Input
                         value={size.sku}
-                        onChange={(e) => handleSizeChange(index, 'sku', e.target.value)}
+                        onChange={(e) =>
+                          handleSizeChange(index, "sku", e.target.value)
+                        }
                       />
                     </div>
                     <div className="col-span-2 space-y-2">
@@ -605,7 +781,9 @@ export default function EditProductPage() {
                       <Input
                         type="number"
                         value={size.stock}
-                        onChange={(e) => handleSizeChange(index, 'stock', e.target.value)}
+                        onChange={(e) =>
+                          handleSizeChange(index, "stock", e.target.value)
+                        }
                       />
                     </div>
                     <div className="col-span-1">
@@ -640,7 +818,9 @@ export default function EditProductPage() {
                   <Label htmlFor="isPublished">Publish to Shop</Label>
                 </div>
                 <p className="text-sm text-muted-foreground">
-                  {isPublished ? "Product is live." : "Product is in inventory (draft)."}
+                  {isPublished
+                    ? "Product is live."
+                    : "Product is in inventory (draft)."}
                 </p>
               </CardContent>
             </Card>
@@ -714,7 +894,9 @@ export default function EditProductPage() {
               </CardHeader>
               <CardContent className="space-y-4">
                 <div className="space-y-2">
-                  <Label htmlFor="sizeChartName">Size Chart Name (Optional)</Label>
+                  <Label htmlFor="sizeChartName">
+                    Size Chart Name (Optional)
+                  </Label>
                   <Input
                     id="sizeChartName"
                     value={sizeChartName}
@@ -818,13 +1000,17 @@ function AddressSelectionAndCreationModal({
               firstName: userDetails.name?.split(" ")[0] || "",
               lastName: userDetails.name?.split(" ").slice(1).join(" ") || "",
               phone: userDetails.phone || "",
-              countryCode: COUNTRY_DATA.find(c => c.iso2 === "IN")?.code || COUNTRY_DATA[0].code,
+              countryCode:
+                COUNTRY_DATA.find((c) => c.iso2 === "IN")?.code ||
+                COUNTRY_DATA[0].code,
               addressLine1: "",
               addressLine2: "",
               city: "",
               state: "",
               pincode: "",
-              country: COUNTRY_DATA.find(c => c.iso2 === "IN")?.country || COUNTRY_DATA[0].country,
+              country:
+                COUNTRY_DATA.find((c) => c.iso2 === "IN")?.country ||
+                COUNTRY_DATA[0].country,
               location: { type: "Point", coordinates: [0, 0] },
             }}
           />
@@ -918,7 +1104,7 @@ function AddressCreationForm({
     libraries: libraries,
   });
 
-  const defaultCenter = useMemo(() => ({ lat: 28.6139, lng: 77.2090 }), []);
+  const defaultCenter = useMemo(() => ({ lat: 28.6139, lng: 77.209 }), []);
 
   const [address, setAddress] = useState(initialAddress);
   const [pinAddressText, setPinAddressText] = useState("");
@@ -962,7 +1148,13 @@ function AddressCreationForm({
   }, [initialAddress, isLoaded, defaultCenter]);
 
   const updateLocationAndAddress = useCallback(
-    async (lat, lng, pan = true, isGeolocated = false, addressSourceText = null) => {
+    async (
+      lat,
+      lng,
+      pan = true,
+      isGeolocated = false,
+      addressSourceText = null
+    ) => {
       const latLng = { lat, lng };
       setMarkerPosition(latLng);
       setMapCenter(latLng);
@@ -981,15 +1173,22 @@ function AddressCreationForm({
         }
 
         const [city, state, country, pincode, countryCodeFound] = (function () {
-          let city = "", state = "", country = "", pincode = "", countryCodeFound = "";
+          let city = "",
+            state = "",
+            country = "",
+            pincode = "",
+            countryCodeFound = "";
           for (const component of components) {
-            if (component.types.includes("locality")) city = component.long_name;
-            if (component.types.includes("administrative_area_level_1")) state = component.short_name;
+            if (component.types.includes("locality"))
+              city = component.long_name;
+            if (component.types.includes("administrative_area_level_1"))
+              state = component.short_name;
             if (component.types.includes("country")) {
               country = component.long_name;
               countryCodeFound = component.short_name;
             }
-            if (component.types.includes("postal_code")) pincode = component.long_name;
+            if (component.types.includes("postal_code"))
+              pincode = component.long_name;
           }
           return [city, state, country, pincode, countryCodeFound];
         })();
@@ -1053,7 +1252,10 @@ function AddressCreationForm({
             (c) => c.code === initial?.countryCode
           );
           if (isLoaded && selectedCountry) {
-            setMapCenter({ lat: selectedCountry.lat, lng: selectedCountry.lng });
+            setMapCenter({
+              lat: selectedCountry.lat,
+              lng: selectedCountry.lng,
+            });
           } else if (isLoaded) {
             setMapCenter(defaultCenter);
           }
@@ -1333,10 +1535,20 @@ function AddressCreationForm({
             <MapPin className="h-4 w-4" />
             <AlertTitle>Selected Address Details</AlertTitle>
             <AlertDescription>
-              <div className="font-medium">{address.label || 'New Address'}</div>
-              <div>{address.firstName} {address.lastName}</div>
-              <div>{address.addressLine1} {address.addressLine2 ? `(${address.addressLine2})` : ''}</div>
-              <div>{address.city} - {address.pincode}, {address.state}, {address.country}</div>
+              <div className="font-medium">
+                {address.label || "New Address"}
+              </div>
+              <div>
+                {address.firstName} {address.lastName}
+              </div>
+              <div>
+                {address.addressLine1}{" "}
+                {address.addressLine2 ? `(${address.addressLine2})` : ""}
+              </div>
+              <div>
+                {address.city} - {address.pincode}, {address.state},{" "}
+                {address.country}
+              </div>
               <div className="text-xs text-muted-foreground mt-1">
                 Phone: {address.countryCode} {address.phone}
               </div>

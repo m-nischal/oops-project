@@ -114,6 +114,7 @@ const ProductSchema = new Schema(
     retailer: { type: String }, // This field is now technically redundant, but we'll leave it.
     category: { type: String },
     price: { type: Number, required: true },
+    discount: { type: Number, default: 0, min: 0, max: 100 },
     images: [{ type: String }],
     sizes: [SizeVariantSchema],
     sizeChart: SizeChartSchema,
