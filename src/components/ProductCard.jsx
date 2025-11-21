@@ -1,123 +1,59 @@
-import React, { useState, useEffect } from "react";
+// src/components/ProductCard.jsx
+import React from "react";
 import Link from "next/link";
+import { Card, CardContent, CardFooter } from "@/components/ui/card";
 import { Star, StarHalf } from "lucide-react";
-import { Badge } from "@/components/ui/badge";
 
-function getAverageRating(reviews = []) {
-  if (!reviews || reviews.length === 0) return 0;
-  const total = reviews.reduce((acc, review) => acc + (review.rating || 0), 0);
-  return (total / reviews.length).toFixed(1);
-}
-
+// Helper to render stars
 function StarRating({ rating }) {
   const fullStars = Math.floor(rating);
-  const hasHalfStar = rating % 1 >= 0.5;
-  const emptyStars = 5 - fullStars - (hasHalfStar ? 1 : 0);
-
+  const hasHalfStar = rating % 1 !== 0;
+  
   return (
-    <div className="flex items-center gap-1 text-yellow-400">
+    <div className="flex items-center gap-1">
       {[...Array(fullStars)].map((_, i) => (
-        <Star key={`full-${i}`} className="w-4 h-4 fill-current" />
+        <Star key={i} className="w-4 h-4 fill-yellow-400 text-yellow-400" />
       ))}
-      {hasHalfStar && <StarHalf className="w-4 h-4 fill-current" />}
-      {[...Array(emptyStars)].map((_, i) => (
-        <Star key={`empty-${i}`} className="w-4 h-4 text-gray-200 fill-gray-100" />
-      ))}
+      {hasHalfStar && <StarHalf className="w-4 h-4 fill-yellow-400 text-yellow-400" />}
+      <span className="text-sm text-gray-600 ml-1">{rating}/5</span>
     </div>
   );
 }
 
-export default function ProductCard({ product, label }) {
-  const [currentImageIndex, setCurrentImageIndex] = useState(0);
-  const [isHovered, setIsHovered] = useState(false);
-
-  const {
-    _id,
-    name,
-    price,
-    discount = 0,
-    images = [],
-    reviews = []
-  } = product;
-
-  const originalPrice = Number(price);
-  const salePrice = discount > 0 
-    ? originalPrice - (originalPrice * (discount / 100)) 
-    : originalPrice;
-
-  const rating = getAverageRating(reviews);
-
-  useEffect(() => {
-    let interval;
-    if (images.length > 1) {
-      interval = setInterval(() => {
-        setCurrentImageIndex((prev) => (prev + 1) % images.length);
-      }, 2000);
-    }
-    return () => clearInterval(interval);
-  }, [images.length]);
+export default function ProductCard({ product }) {
+  // Calculate average rating from reviews (if any), default to 4.5 for demo
+  const rating = product.reviews?.length 
+    ? (product.reviews.reduce((acc, r) => acc + r.rating, 0) / product.reviews.length).toFixed(1)
+    : "4.5"; // Default mock rating to match design style
 
   return (
-    <Link href={`/product/${_id}`} className="group block h-full">
-      <div 
-        className="flex flex-col h-full gap-3"
-        onMouseEnter={() => setIsHovered(true)}
-        onMouseLeave={() => setIsHovered(false)}
-      >
-        {/* Image Container */}
-        <div className="relative aspect-square w-full overflow-hidden rounded-[20px] bg-[#F0EEED]">
-          <img
-            src={images[currentImageIndex] || "/images/placeholder.png"}
-            alt={name}
-            className="h-full w-full object-cover object-center transition-all duration-500"
-          />
-          
-          {/* LABEL BADGE (For "LOCAL") */}
-          {label && (
-            <Badge className="absolute top-3 left-3 bg-black text-white border-none px-3 py-1 text-xs font-bold tracking-wide uppercase shadow-md z-10">
-              {label}
-            </Badge>
-          )}
-
-          {/* Discount Badge */}
-          {discount > 0 && (
-            <Badge className="absolute top-3 right-3 bg-red-500 hover:bg-red-600 text-white border-none">
-              -{discount}%
-            </Badge>
-          )}
-        </div>
-
-        {/* Product Details */}
-        <div className="space-y-1">
-          <h3 className="text-base font-bold text-black truncate group-hover:text-gray-600 transition-colors capitalize">
-            {name}
-          </h3>
-
-          <div className="flex items-center gap-2 text-sm">
-            <StarRating rating={Number(rating)} />
-            <span className="text-sm text-gray-600">
-              {rating}/5
-            </span>
+    <Link href={`/product/${product._id}`} className="group">
+      <Card className="border-none shadow-none bg-transparent hover:scale-[1.02] transition-transform cursor-pointer">
+        <CardContent className="p-0">
+          <div className="bg-[#F0EEED] rounded-[20px] aspect-square mb-4 overflow-hidden relative">
+             <img 
+               src={product.images?.[0] || "/images/placeholder.png"} 
+               alt={product.name}
+               className="w-full h-full object-cover object-center"
+             />
           </div>
-
-          <div className="flex items-center gap-2 mt-1">
-            <span className="text-xl font-bold text-black">
-              ₹{salePrice.toLocaleString("en-IN")}
-            </span>
-            
-            {discount > 0 && (
-              <>
-                <span className="text-xl font-bold text-gray-400 line-through">
-                  ₹{originalPrice.toLocaleString("en-IN")}
-                </span>
-                <Badge variant="secondary" className="bg-red-100 text-red-600 hover:bg-red-100 border-none px-2 py-0.5 text-xs">
-                  -{discount}%
-                </Badge>
-              </>
-            )}
+          <h3 className="font-bold text-lg truncate mb-1 group-hover:text-primary">{product.name}</h3>
+          <StarRating rating={Number(rating)} />
+          <div className="mt-2 flex items-center gap-3">
+             <span className="font-bold text-xl">₹{product.price?.toLocaleString('en-IN')}</span>
+             {product.discount > 0 && (
+                <>
+                  <span className="text-gray-400 line-through font-medium">
+                    ₹{Math.round(product.price * (1 + product.discount/100)).toLocaleString('en-IN')}
+                  </span>
+                  <span className="bg-red-100 text-red-600 text-xs px-2 py-1 rounded-full">
+                    -{product.discount}%
+                  </span>
+                </>
+             )}
           </div>
-        </div>
-      </div>
+        </CardContent>
+      </Card>
     </Link>
   );
 }
