@@ -23,7 +23,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, Di
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { AlertTriangle, Loader2, ShoppingCart, Check } from "lucide-react";
+import { AlertTriangle, Loader2, ShoppingCart, Check, CheckCircle } from "lucide-react";
 import { useAuthGuard } from '../../hooks/useAuthGuard';
 
 const formatPrice = (p) => `₹${Number(p || 0).toLocaleString('en-IN')}`;
@@ -49,6 +49,7 @@ export default function StockFromWholesalerPage() {
   const [orderSize, setOrderSize] = useState("");
   const [orderQty, setOrderQty] = useState(10);
   const [isOrdering, setIsOrdering] = useState(false);
+  const [showSuccessModal, setShowSuccessModal] = useState(false); // <--- NEW STATE
   
   // Track stocked items
   const [stockedProductIds, setStockedProductIds] = useState(new Set());
@@ -144,13 +145,14 @@ export default function StockFromWholesalerPage() {
         if (res.status === 409) { 
           setStockedProductIds(prev => new Set(prev).add(selectedProduct._id));
         }
-        // Display the specific error message from the API (like "Quantity X is below minimum Y")
         throw new Error(errData.error || "Failed to place order");
       }
 
-      alert("Order placed successfully! Check your Order List.");
       setStockedProductIds(prev => new Set(prev).add(selectedProduct._id));
       setSelectedProduct(null); 
+      
+      // --- Show Success Modal instead of Alert ---
+      setShowSuccessModal(true);
 
     } catch (err) {
       console.error(err);
@@ -196,7 +198,6 @@ export default function StockFromWholesalerPage() {
               <Card key={product._id}>
                 <CardHeader className="pb-2">
                   <CardTitle className="text-lg">{product.name}</CardTitle>
-                  {/* --- Show MOQ on Card --- */}
                   <CardDescription>
                      {formatPrice(product.price)} / unit 
                      {product.minOrderQuantity > 1 && <span className="block text-xs font-semibold text-blue-600 mt-1">MOQ: {product.minOrderQuantity} units</span>}
@@ -307,6 +308,31 @@ export default function StockFromWholesalerPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* --- SUCCESS MODAL --- */}
+      {showSuccessModal && (
+        <div className="fixed inset-0 bg-black/80 z-[100] flex items-center justify-center p-6 backdrop-blur-md">
+          <div className="bg-white rounded-[32px] w-full max-w-sm p-8 text-center shadow-2xl animate-in fade-in zoom-in-95 duration-300">
+            <div className="w-20 h-20 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-6">
+              <CheckCircle className="w-10 h-10 text-blue-600" />
+            </div>
+            
+            <h2 className="text-2xl font-black text-gray-900 mb-2 tracking-tight">
+              Order Placed!
+            </h2>
+            <p className="text-gray-500 mb-8">
+              Your bulk order has been successfully placed with the wholesaler.
+            </p>
+
+            <button
+              onClick={() => setShowSuccessModal(false)}
+              className="w-full py-4 rounded-xl bg-black text-white font-bold text-lg hover:scale-[1.02] active:scale-[0.98] transition-all shadow-xl shadow-gray-200"
+            >
+              Continue Shopping
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Pagination Controls */}
       {totalPages > 1 && (

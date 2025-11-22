@@ -48,10 +48,13 @@ import { Button } from '@/components/ui/button';
 // Helper to format currency
 const formatPrice = (p) => `₹${Number(p || 0).toLocaleString('en-IN')}`;
 
+// --- MODIFIED: Removed delivery stages from manual selection ---
 const settableStatuses = [
-  "processing", "shipped", "out_for_delivery", "delivered", "cancelled"
+  "processing", "shipped", "cancelled"
 ];
-const finalStatuses = ["delivered", "cancelled", "refunded"];
+
+// --- MODIFIED: Added out_for_delivery to final statuses to prevent editing once shipped/picked up ---
+const finalStatuses = ["out_for_delivery", "delivered", "cancelled", "refunded"];
 const ORDERS_PER_PAGE = 10;
 
 export default function WholesalerOrdersPage() {
@@ -264,6 +267,12 @@ export default function WholesalerOrdersPage() {
                                 <SelectValue placeholder="Change status..." />
                               </SelectTrigger>
                               <SelectContent>
+                                {/* Always show current status even if locked/hidden from choices */}
+                                {!settableStatuses.includes(order.status) && (
+                                   <SelectItem value={order.status} disabled>
+                                     {order.status.charAt(0).toUpperCase() + order.status.slice(1).replace(/_/g, ' ')}
+                                   </SelectItem>
+                                )}
                                 {settableStatuses.map(status => (
                                   <SelectItem key={status} value={status}>
                                     {status.charAt(0).toUpperCase() + status.slice(1)}
@@ -391,7 +400,7 @@ function RetailerAnalyticsModal({ isOpen, onClose, isLoading, data, error }) {
                     <TableRow key={order._id}>
                       <TableCell className="font-medium">#{order._id.slice(-6)}</TableCell>
                       <TableCell>
-                        <Badge variant={finalStatuses.includes(order.status) ? 'default' : 'secondary'}>
+                        <Badge variant={["delivered", "cancelled", "refunded"].includes(order.status) ? 'default' : 'secondary'}>
                           {order.status}
                         </Badge>
                       </TableCell>

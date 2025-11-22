@@ -1,7 +1,7 @@
 // src/pages/delivery/[id].js
 import { useRouter } from "next/router";
 import { useEffect, useState } from "react";
-import { ArrowLeft, MapPin, Package, Phone, AlertCircle } from "lucide-react";
+import { ArrowLeft, MapPin, Package, Phone, AlertCircle, CheckCircle } from "lucide-react"; 
 
 import DeliveryDetail from "../../components/DeliveryDetail";
 import DeliveryLogin from "../../components/DeliveryLogin";
@@ -20,6 +20,7 @@ export default function DeliveryDetailPage() {
   const [note, setNote] = useState("");
   const [otp, setOtp] = useState("");
   const [showOtpModal, setShowOtpModal] = useState(false);
+  const [showSuccessModal, setShowSuccessModal] = useState(false); 
 
   // Auth State
   const [authChecked, setAuthChecked] = useState(false);
@@ -43,7 +44,8 @@ export default function DeliveryDetailPage() {
   // DATA FETCHING
   // ---------------------------------------------------------
   async function fetchDelivery() {
-    setLoading(true);
+    // Only set loading true on initial load, not re-fetches
+    if (!delivery) setLoading(true); 
     setError("");
     try {
       const res = await fetch(`/api/delivery/${id}`, { credentials: "same-origin" });
@@ -103,7 +105,12 @@ export default function DeliveryDetailPage() {
       const data = await safeParseJson(res);
       if (!res.ok || !data.ok) throw new Error(data?.error || "Action failed");
       
+      // Update local state with the returned delivery object
       setDelivery(data.delivery || data);
+      
+      // --- FIX: Force a re-fetch to ensure all populated fields (like order total) are up-to-date ---
+      await fetchDelivery(); 
+      
       return { ok: true, data };
     } catch (e) {
       console.error("postAction error:", e);
@@ -148,9 +155,14 @@ export default function DeliveryDetailPage() {
 
     if (res.ok) {
       setShowOtpModal(false);
-      alert("Delivery Successful!");
-      router.push("/delivery/assigned"); 
+      setShowSuccessModal(true); 
     }
+  };
+
+  // Handle closing the success modal
+  const handleSuccessClose = () => {
+    setShowSuccessModal(false);
+    router.push("/delivery/assigned");
   };
 
   // ---------------------------------------------------------
@@ -158,7 +170,9 @@ export default function DeliveryDetailPage() {
   // ---------------------------------------------------------
   if (!authChecked) return <div className="min-h-screen flex items-center justify-center text-gray-500">Checking authentication...</div>;
   if (!isDeliveryUser) return <DeliveryLogin onLogin={fetchDelivery} />;
-  if (loading) return <div className="min-h-screen flex items-center justify-center text-gray-500">Loading delivery...</div>;
+  // Modified loading check: show loading only if we have NO data yet. 
+  // If we have data (e.g. during refresh), show the old data to prevent flicker.
+  if (loading && !delivery) return <div className="min-h-screen flex items-center justify-center text-gray-500">Loading delivery...</div>;
   
   if (error && !delivery) {
     return (
@@ -187,7 +201,11 @@ export default function DeliveryDetailPage() {
     customerAddress: delivery.dropoff?.address,
     customerPhone: delivery.dropoff?.phone,
     items: delivery.items?.map((it) => (typeof it === 'string' ? it : it.name)) || [],
-    total: delivery.total || delivery.amount,
+    
+    // Ensure total falls back correctly if missing on delivery object
+    // We prioritize delivery.total, then orderRef.total
+    total: delivery.total || (delivery.orderRef && delivery.orderRef.total) || delivery.amount || 0,
+    
     distance: delivery.distance,
     estimatedEarnings: delivery.estimatedEarnings || delivery.deliveryFee || 0,
     pickupTime: delivery.pickupTime,
@@ -203,14 +221,14 @@ export default function DeliveryDetailPage() {
           order={detailProps}
           onBack={() => router.push("/delivery/assigned")}
           onPickup={handlePickup}
-          onStartDelivery={handleStartDelivery} // New Handler
+          onStartDelivery={handleStartDelivery} 
           onDeliver={() => setShowOtpModal(true)}
         />
 
         {/* OTP MODAL */}
         {showOtpModal && (
           <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
-            <div className="bg-white rounded-3xl w-full max-w-md overflow-hidden shadow-2xl p-6">
+            <div className="bg-white rounded-3xl w-full max-w-md overflow-hidden shadow-2xl p-6 animate-in fade-in zoom-in-95 duration-200">
               <h3 className="font-bold text-lg text-gray-900 mb-2">Complete Delivery</h3>
               <p className="text-gray-500 text-sm mb-6">Ask the customer for the delivery PIN/OTP.</p>
 
@@ -242,6 +260,31 @@ export default function DeliveryDetailPage() {
                   {actionLoading ? "Verifying..." : "Verify & Complete"}
                 </button>
               </div>
+            </div>
+          </div>
+        )}
+
+        {/* --- SUCCESS POPUP MODAL --- */}
+        {showSuccessModal && (
+          <div className="fixed inset-0 bg-black/80 z-[60] flex items-center justify-center p-6 backdrop-blur-md">
+            <div className="bg-white rounded-[32px] w-full max-w-sm p-8 text-center shadow-2xl animate-in fade-in zoom-in-95 duration-300">
+              <div className="w-20 h-20 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-6">
+                <CheckCircle className="w-10 h-10 text-green-600" />
+              </div>
+              
+              <h2 className="text-2xl font-black text-gray-900 mb-2 tracking-tight">
+                Delivery Complete!
+              </h2>
+              <p className="text-gray-500 mb-8">
+                Great job! The order has been successfully verified and marked as delivered.
+              </p>
+
+              <button
+                onClick={handleSuccessClose}
+                className="w-full py-4 rounded-xl bg-black text-white font-bold text-lg hover:scale-[1.02] active:scale-[0.98] transition-all shadow-xl shadow-gray-200"
+              >
+                Done
+              </button>
             </div>
           </div>
         )}
