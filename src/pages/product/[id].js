@@ -1,6 +1,6 @@
 // src/pages/product/[id].js
 import { useRouter } from "next/router";
-import { useEffect, useState, useRef, useCallback } from "react";
+import { useEffect, useState, useRef, useCallback, useMemo } from "react";
 import Link from "next/link";
 import SizeChartModal from "components/SizeChartModal";
 import CustomerNavbar from "@/components/CustomerNavbar"; 
@@ -8,7 +8,8 @@ import StarRating from "@/components/StarRating";
 import ProductCard from "@/components/ProductCard";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Loader2, MapPinOff, Info, RefreshCw, MapPin, Truck } from "lucide-react";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Loader2, MapPinOff, Info, RefreshCw, MapPin, Truck, CheckCircle } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -112,7 +113,11 @@ export default function ProductDetailPage() {
   // size & quantity
   const [selectedSize, setSelectedSize] = useState(null);
   const [selectedSizeStock, setSelectedSizeStock] = useState(0);
-  const [selectedProxyStock, setSelectedProxyStock] = useState(0); // New State for Proxy
+  const [selectedProxyStock, setSelectedProxyStock] = useState(0); // Wholesaler Stock
+  // NEW STATES FOR PROXY CHECK UI
+  const [localStock, setLocalStock] = useState(0); // Retailer Stock only (calculated)
+  const [proxyCheckState, setProxyCheckState] = useState('initial'); // 'initial', 'checking', 'checked_available', 'checked_unavailable'
+  
   const [qty, setQty] = useState(1);
   const prevQtyRef = useRef(1);
 
@@ -132,6 +137,40 @@ export default function ProductDetailPage() {
   const [showLocationHelp, setShowLocationHelp] = useState(false);
   const [customerLocation, setCustomerLocation] = useState(null);
   
+  const isProxyProduct = product?.wholesaleSourceId;
+  const isLocalStockZeroOrLess = localStock <= 0;
+
+  // NEW HANDLER: For the Check Availability button
+  const handleCheckAvailability = () => {
+      if (!isProxyProduct || !isLocalStockZeroOrLess) return;
+      setProxyCheckState('checking');
+
+      // Simulate API call delay (stock is already in selectedProxyStock)
+      setTimeout(() => {
+          if (selectedProxyStock > 0) {
+              setProxyCheckState('checked_available');
+              setQty(Math.max(1, qty)); // Ensure qty is at least 1
+              prevQtyRef.current = Math.max(1, qty);
+          } else {
+              setProxyCheckState('checked_unavailable');
+              setQty(0); // Cannot order
+              prevQtyRef.current = 0;
+          }
+      }, 500); // Simulate network delay
+  };
+
+  // Max quantity a user can select. Depends on proxyCheckState if locally out of stock.
+  const maxQtyLimit = useMemo(() => {
+      if (isProxyProduct && isLocalStockZeroOrLess) {
+          // If local stock is zero/less, limit to wholesaler stock only if checked AND available
+          if (proxyCheckState === 'checked_available') {
+              return selectedProxyStock;
+          }
+          return 0; // Cannot order before checking / if unavailable
+      }
+      return selectedSizeStock; // Use total available (local + proxy) if local stock is > 0
+  }, [isProxyProduct, isLocalStockZeroOrLess, proxyCheckState, selectedProxyStock, selectedSizeStock]);
+
   // Fetch Retailer/Owner Data
   const fetchOwnerData = useCallback(async (ownerId) => {
     try {
@@ -209,15 +248,8 @@ export default function ProductDetailPage() {
     // Helper to process valid location data
     const estimate = (locData) => {
         setCustomerLocation(locData);
-        // Note: We do NOT call fetchDeliveryEstimate here anymore. 
-        // The useEffect below watching `customerLocation` will trigger it.
-        // This prevents double-fetching.
         
         setLocationError(false);
-        
-        // --- CRITICAL FIX: REMOVED THE EVENT DISPATCH ---
-        // This function consumes the location; it shouldn't announce it, 
-        // otherwise the listener calls this function again -> Infinite Loop.
     };
 
     const savedLoc = localStorage.getItem("livemart_active_location");
@@ -252,7 +284,7 @@ export default function ProductDetailPage() {
             setLocationError(true); // Set error state to show help button
         }
     );
-  }, []); // Removed fetchDeliveryEstimate form dependency as we don't call it directly
+  }, []);
 
 
   // --- Effect to load product & handle location listeners ---
@@ -287,8 +319,10 @@ export default function ProductDetailPage() {
         const initialSizeLabel = initialSize ? sizeLabelOf(initialSize) : null;
 
         // Default stock is now totalAvailable (local + proxy)
-        let defaultStock = initialSize ? Number(initialSize.totalAvailable ?? initialSize.stock ?? 0) : totalStockFrom(p);
+        let defaultTotalStock = initialSize ? Number(initialSize.totalAvailable ?? initialSize.stock ?? 0) : totalStockFrom(p);
         let defaultProxy = initialSize ? Number(initialSize.proxyStock || 0) : 0;
+        let defaultLocal = defaultTotalStock - defaultProxy; // CALCULATE LOCAL STOCK
+        
         let defaultQty = 1;
 
         if (initialSizeLabel) {
@@ -301,12 +335,16 @@ export default function ProductDetailPage() {
         // Final state setup
         if (initialSize) {
           setSelectedSize(initialSizeLabel);
-          setSelectedSizeStock(defaultStock);
-          setSelectedProxyStock(defaultProxy); 
+          setSelectedSizeStock(defaultTotalStock);
+          setSelectedProxyStock(defaultProxy);
+          setLocalStock(defaultLocal); // SET LOCAL STOCK
+          setProxyCheckState(defaultLocal > 0 ? 'checked_available' : 'initial'); // Pre-check if local stock exists
         } else {
           setSelectedSize(null);
-          setSelectedSizeStock(defaultStock);
+          setSelectedSizeStock(defaultTotalStock);
           setSelectedProxyStock(0);
+          setLocalStock(0); // SET LOCAL STOCK
+          setProxyCheckState('initial');
         }
         
         setQty(defaultQty); 
@@ -343,6 +381,30 @@ export default function ProductDetailPage() {
       }
   }, [product, customerLocation, fetchDeliveryEstimate]);
 
+  // CRITICAL: Memoize Delivery Data Calculation
+  const deliveryData = useMemo(() => {
+    if (!deliveryEstimate || !deliveryEstimate.estimatedDays) return { dateString: "N/A", totalDays: null, baseDays: null, extraDays: 0 };
+    
+    const baseDays = deliveryEstimate.estimatedDays;
+    // Check if we are actively relying on proxy stock for this size
+    const isUsingProxyBuffer = isProxyProduct && isLocalStockZeroOrLess && selectedProxyStock > 0;
+    
+    // Extra days logic: 3 days buffer if using proxy stock
+    const extraDays = isUsingProxyBuffer ? 3 : 0; 
+    const totalDays = baseDays + extraDays;
+    
+    const date = new Date();
+    date.setDate(date.getDate() + totalDays);
+    const dateString = date.toLocaleDateString('en-IN', { weekday: 'short', month: 'short', day: 'numeric' });
+
+    return { 
+      dateString, 
+      totalDays, 
+      baseDays,
+      extraDays 
+    };
+  }, [deliveryEstimate, isProxyProduct, isLocalStockZeroOrLess, selectedProxyStock]);
+
   const handleLocateMeClick = () => {
     // When the user explicitly clicks the button, bypass the saved location check 
     // to force a new browser location prompt.
@@ -356,12 +418,17 @@ export default function ProductDetailPage() {
     setSelectedSize(newSizeLabel);
     const newSize = product.sizes.find(s => sizeLabelOf(s) === newSizeLabel);
     
-    // Update both total and proxy stock
+    // Update stock states based on the newly selected size variant
     const newTotal = newSize ? Number(newSize.totalAvailable ?? newSize.stock ?? 0) : 0;
     const newProxy = newSize ? Number(newSize.proxyStock || 0) : 0;
+    const newLocal = newTotal - newProxy; // CALCULATE LOCAL STOCK (Retailer's stock)
     
     setSelectedSizeStock(newTotal);
     setSelectedProxyStock(newProxy);
+    setLocalStock(newLocal); // SET LOCAL STOCK
+
+    // CRITICAL FIX: Reset check state to force user to re-check if local stock is zero
+    setProxyCheckState(newLocal > 0 ? 'checked_available' : 'initial');
 
     const currentCartItem = getCartItem(product._id, newSizeLabel);
     const cartQty = currentCartItem ? currentCartItem.qty : 1;
@@ -371,7 +438,9 @@ export default function ProductDetailPage() {
   
   const handleQtyChange = (e) => {
     let newQty = Number(e.target.value);
-    const maxStock = selectedSize ? selectedSizeStock : totalStockFrom(product); // This is the absolute limit
+    
+    // Use the derived limit
+    const maxStock = maxQtyLimit;
 
     if (isNaN(newQty)) {
         newQty = prevQtyRef.current; // Revert to previous valid quantity if input is NaN
@@ -380,7 +449,7 @@ export default function ProductDetailPage() {
     newQty = Math.floor(Math.max(1, newQty));
     
     if (newQty > maxStock) {
-        alert(`Maximum available units for this product is ${maxStock}.`);
+        alert(`Maximum available units is ${maxStock}.`);
         newQty = maxStock;
     }
     
@@ -390,7 +459,7 @@ export default function ProductDetailPage() {
   
   function incrementQty() {
     const newQty = Number(qty || 0) + 1;
-    const maxStock = selectedSize ? selectedSizeStock : totalStockFrom(product);
+    const maxStock = maxQtyLimit; // Use the derived limit
     
     if (newQty > maxStock) {
         alert(`Only ${maxStock} units available in total.`);
@@ -418,6 +487,18 @@ export default function ProductDetailPage() {
       const sizeLabel = selectedSize;
 
       if (!sizeLabel) { alert("Please select a size."); return; }
+      
+      // CRITICAL CHECK for proxy: must have checked availability for this size
+      if (isProxyProduct && isLocalStockZeroOrLess) {
+          if (proxyCheckState !== 'checked_available' || selectedProxyStock <= 0) {
+              alert("Please check stock availability first.");
+              return;
+          }
+          if (desiredTotalQty > selectedProxyStock) {
+              alert(`Cannot order more than ${selectedProxyStock} units from wholesaler.`);
+              return;
+          }
+      }
 
       const existingIndex = cart.findIndex(i => String(i.productId) === pid && String(i.size) === sizeLabel);
       
@@ -464,15 +545,7 @@ export default function ProductDetailPage() {
 
   // --- END FIXED QTY HANDLERS ---
   
-  const getDeliveryDate = () => {
-    if (!deliveryEstimate || !deliveryEstimate.estimatedDays) return "N/A";
-    // Add buffer days for proxy items
-    const extraDays = selectedProxyStock > 0 ? 3 : 0;
-    const totalDays = deliveryEstimate.estimatedDays + extraDays;
-    const date = new Date();
-    date.setDate(date.getDate() + totalDays);
-    return date.toLocaleDateString('en-IN', { weekday: 'short', month: 'short', day: 'numeric' });
-  };
+  // NOTE: getDeliveryDate removed, deliveryData useMemo used instead.
   
   const showDeliveryWarning = locationError && !loading;
 
@@ -489,13 +562,19 @@ export default function ProductDetailPage() {
     </>;
 
   const displayRating = getDisplayRating(product);
-  const totalStock = selectedSizeStock; 
-  const incrementDisabled = qty >= totalStock;
+  
+  // Use maxQtyLimit for UI max (it's 0 if check not done/unavailable)
+  const maxAvailableForUI = maxQtyLimit; 
+
+  const incrementDisabled = qty >= maxAvailableForUI;
   const decrementDisabled = qty <= 1;
-  const isOutOfStock = totalStock <= 0;
+  const isOutOfStock = maxAvailableForUI <= 0 && proxyCheckState !== 'initial'; // Out of stock if the limit is 0 AND we've checked.
+  
+  // Disable add to cart if we are waiting for a check AND local stock is zero
+  const isAddToCartDisabled = isProxyProduct && isLocalStockZeroOrLess && proxyCheckState !== 'checked_available';
+  
   const chartImageUrl = sizeImage;
   
-  // FIX: Show the button if an image is available OR if structured data exists
   const chartAvailable = Boolean(chartImageUrl) || Boolean(product.sizeChart?.data);
   const showChartButton = chartAvailable && isClothingProduct(product);
 
@@ -629,14 +708,18 @@ export default function ProductDetailPage() {
                   {product.sizes.map(s => {
                     const label = sizeLabelOf(s);
                     const isSelected = label === selectedSize;
-                    const stock = Number(s.totalAvailable ?? s.stock ?? 0);
+                    
+                    // CRITICAL FIX: Only disable if the total stock for THIS size is 0
+                    const totalAvailable = Number(s.totalAvailable ?? s.stock ?? 0);
+                    const isDisabled = totalAvailable <= 0;
+
                     return (
                       <Button
                         key={label}
                         variant={isSelected ? "default" : "outline"}
                         onClick={() => handleSizeChange(label)}
-                        disabled={stock <= 0}
-                        className={`font-semibold ${stock <= 0 ? 'opacity-50 cursor-not-allowed' : ''} h-12 w-16`}
+                        disabled={isDisabled}
+                        className={`font-semibold ${isDisabled ? 'opacity-50 cursor-not-allowed' : ''} h-12 w-16`}
                       >
                         {label}
                       </Button>
@@ -644,22 +727,70 @@ export default function ProductDetailPage() {
                   })}
                 </div>
 
-                {/* --- STOCK STATUS MESSAGE --- */}
-                <div className="text-sm mt-2">
-                   {isOutOfStock ? (
-                      <span className="text-red-600 font-bold">Out of Stock</span>
-                   ) : selectedProxyStock > 0 && (selectedSizeStock - selectedProxyStock <= 0) ? (
-                      <div className="flex items-start gap-2 p-3 bg-blue-50 text-blue-800 rounded-lg border border-blue-100">
-                          <Truck className="w-5 h-5 shrink-0 mt-0.5" />
-                          <div>
-                              <p className="font-bold">Available via Partner Stock</p>
-                              <p className="text-xs mt-1">This item is shipping from our wholesale partner. Please allow <strong>3-5 extra days</strong> for delivery.</p>
+                {/* --- UPDATED STOCK STATUS MESSAGE BLOCK (Styling Applied) --- */}
+                {selectedSize && (
+                   <div className={`text-sm mt-2 p-3 rounded-lg transition-all ${!isProxyProduct || !isLocalStockZeroOrLess ? 'border-green-200 bg-green-50' : 'border-gray-300 bg-white'}`}>
+                  
+                    {/* SCENARIO 1: Retailer has local stock (or not a proxy product) */}
+                    {!isProxyProduct || !isLocalStockZeroOrLess ? (
+                      <span className="text-green-700 font-medium">
+                        In Stock ({localStock} units)
+                      </span>
+                    ) : (
+                      /* SCENARIO 2: Proxy product, local stock is zero or less */
+                      <>
+                        {proxyCheckState === 'initial' ? (
+                          /* State 2a: Initial state for proxy out-of-local-stock (Styled) */
+                          <div className="flex items-center justify-between p-2 rounded-lg border border-red-300 bg-red-50">
+                            <span className="text-red-800 font-semibold text-sm">No local stock. Check wholesaler for backorder.</span>
+                            <Button 
+                              variant="default" 
+                              size="sm" 
+                              onClick={handleCheckAvailability} 
+                              className="bg-blue-600 hover:bg-blue-700 text-white shadow-md transition-all"
+                              disabled={proxyCheckState === 'checking'}
+                            >
+                              {proxyCheckState === 'checking' ? (
+                                  <>
+                                    <Loader2 className="h-4 w-4 animate-spin mr-1" />
+                                    Checking...
+                                  </>
+                              ) : (
+                                  <>
+                                    <CheckCircle className="h-4 w-4 mr-1" />
+                                    Check Availability
+                                  </>
+                              )}
+                            </Button>
                           </div>
-                      </div>
-                   ) : (
-                      <span className="text-green-700 font-medium">In Stock ({selectedSizeStock} units)</span>
-                   )}
-                </div>
+                        ) : proxyCheckState === 'checking' ? (
+                           <div className="flex items-center text-blue-600 font-medium p-2">
+                              <Loader2 className="h-4 w-4 animate-spin mr-2" /> Checking availability...
+                           </div>
+                        ) : (
+                          /* State 2b: Availability checked */
+                          <>
+                            {selectedProxyStock > 0 ? (
+                              /* Result 2b-i: Stock available at wholesaler */
+                              <div className="flex items-start gap-2 p-3 bg-blue-50 text-blue-800 rounded-lg border border-blue-100">
+                                <Truck className="w-5 h-5 shrink-0 mt-0.5" />
+                                <div>
+                                  <p className="font-bold">stock available at wholesaler : {selectedProxyStock}</p>
+                                  <p className="text-xs mt-1">Please allow <strong>3-5 extra days</strong> for delivery.</p>
+                                </div>
+                              </div>
+                            ) : (
+                              /* Result 2b-ii: No stock available */
+                              <span className="text-red-600 font-bold">no stock available</span>
+                            )}
+                          </>
+                        )}
+                      </>
+                    )}
+                  </div>
+                )}
+                {/* --- END UPDATED STOCK STATUS MESSAGE BLOCK --- */}
+
 
                 {/* Size Chart Button in the middle-right area */}
                 {showChartButton && (
@@ -713,13 +844,20 @@ export default function ProductDetailPage() {
                         </Button>
                     </div>
 
-                    {/* Add to Cart Button (unchanged) */}
+                    {/* Add to Cart Button */}
                     <Button
                         onClick={handleAddToCart}
-                        disabled={adding || isOutOfStock || (selectedSize && selectedSizeStock <= 0)}
+                        // Use isAddToCartDisabled to respect the pre-check requirement
+                        disabled={adding || isOutOfStock || isAddToCartDisabled}
                         className="flex-1 rounded-full py-6 text-lg bg-black text-white hover:bg-black/80"
                     >
-                        {adding ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : "Add to Cart"}
+                        {isAddToCartDisabled ? (
+                          <>
+                           <CheckCircle className="h-4 w-4" /> Check Stock First
+                          </>
+                        ) : adding ? (
+                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        ) : "Add to Cart"}
                     </Button>
                 </div>
                 
@@ -772,9 +910,15 @@ export default function ProductDetailPage() {
                     <p className="text-lg">
                         Estimated Delivery by: 
                         <strong className="ml-2 text-green-700">
-                            {getDeliveryDate()}
+                            {deliveryData.dateString}
                         </strong> 
-                        {deliveryEstimate?.estimatedDays !== null && ` (${deliveryEstimate?.estimatedDays} days)`}
+                        {deliveryData.totalDays !== null && ` (${deliveryData.totalDays} days)`}
+                        
+                        {deliveryData.extraDays > 0 && (
+                            <span className="text-sm text-red-600 ml-2 font-medium block md:inline-block">
+                                (+{deliveryData.extraDays} days for Wholesaler handling)
+                            </span>
+                        )}
                     </p>
                 )}
             </div>
@@ -916,6 +1060,9 @@ const DETAIL_LABELS = {
 };
 
 function ProductDetailsTab({ product }) {
+    // FIX: Guard clause for null product object
+    if (!product) return null;
+
     const details = product.productDetails || {};
     
     const processedDetails = [];
@@ -1010,6 +1157,9 @@ function ProductDetailsTab({ product }) {
 }
 
 function ReviewsTab({ product, displayRating }) {
+    // FIX: Guard clause for null product object
+    if (!product) return null;
+
     const reviews = product.reviews || [];
 
     if (reviews.length === 0) {

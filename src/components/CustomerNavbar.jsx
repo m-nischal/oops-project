@@ -82,16 +82,17 @@ export default function CustomerNavbar() {
     }
   };
 
-  // --- FIXED: Universal Navigation Handler with Exit Check ---
+  // --- FIX: Universal Navigation Handler with Exit Check ---
   const handleNavigation = useCallback((e, url, message) => {
     // 1. If not on checkout page, navigate directly and exit.
     if (router.pathname !== '/checkout') {
-      router.push(url); // <-- FIX APPLIED HERE
+      router.push(url);
       return; 
     }
     
     // 2. If on checkout page, trigger the warning modal.
-    if (e.type === 'click' && e.currentTarget.tagName.toLowerCase() === 'a') {
+    // Check if e exists and has preventDefault (only present on synthetic events from link clicks)
+    if (e && typeof e.preventDefault === 'function') { 
         e.preventDefault();
     }
     
@@ -158,8 +159,9 @@ export default function CustomerNavbar() {
 
   const handleLogout = async () => {
     // If on checkout, trigger warning, otherwise logout immediately
+    // CRITICAL FIX: Pass null as the event object since it's not a real DOM event
     if (router.pathname === '/checkout') {
-        handleNavigation({ type: 'click' }, '/login', "Leaving Checkout page. Your progress may be lost.");
+        handleNavigation(null, '/login', "Leaving Checkout page. Your progress may be lost.");
         return;
     }
     try {
