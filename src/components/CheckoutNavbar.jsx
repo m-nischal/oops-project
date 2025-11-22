@@ -78,19 +78,27 @@ export default function CustomerNavbar() {
     }
   };
 
+  // --- FIX: Universal Navigation Handler with Exit Check ---
   const handleNavigation = useCallback((e, url, message) => {
     if (router.pathname !== '/checkout') {
+      router.push(url);
       return; 
     }
     
-    if (e.type === 'click' && e.currentTarget.tagName.toLowerCase() === 'a') {
+    // FIX 1: Safely check for preventDefault to handle mock event object (null or { type: 'click' })
+    if (e && typeof e.preventDefault === 'function') {
         e.preventDefault();
     }
     
-    setNextUrl(url);
+    // FIX 2: Implement User's policy: When exiting checkout via internal link, 
+    // the target destination (nextUrl) should be /cart.
+    const isInternalRoute = url.startsWith('/') && !url.startsWith('http');
+    const finalExitUrl = isInternalRoute ? '/cart' : url; 
+
+    setNextUrl(finalExitUrl);
     setExitMessage(message);
     setShowExitWarning(true);
-  }, [router.pathname]);
+  }, [router.pathname, router]);
   
   const confirmExit = () => {
       setShowExitWarning(false);
@@ -147,8 +155,10 @@ export default function CustomerNavbar() {
   }, [router]);
 
   const handleLogout = async () => {
+    // If on checkout, trigger warning, otherwise logout immediately
+    // CRITICAL FIX: Pass null as the event object and rely on handleNavigation to set the exit destination to /cart
     if (router.pathname === '/checkout') {
-        handleNavigation({ type: 'click' }, '/login', "Leaving Checkout page. Your progress may be lost.");
+        handleNavigation(null, '/login', "Leaving Checkout page. Your progress may be lost.");
         return;
     }
     try {

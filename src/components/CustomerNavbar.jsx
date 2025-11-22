@@ -1,4 +1,4 @@
-// src/components/CheckoutNavbar.jsx
+// src/components/CustomerNavbar.jsx
 import React, { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
 import { useRouter } from "next/router";
@@ -33,12 +33,15 @@ export default function CustomerNavbar() {
   const router = useRouter();
   const [user, setUser] = useState(null);
   
+  // --- Cart State (Tracks unique item count) ---
   const [cartItemCount, setCartItemCount] = useState(0); 
 
+  // --- Address & Modal State ---
   const [isAddressModalOpen, setIsAddressModalOpen] = useState(false);
   const [selectedAddress, setSelectedAddress] = useState(null);
   const [showManualModal, setShowManualModal] = useState(false);
 
+  // --- Checkout Exit Warning State ---
   const [showExitWarning, setShowExitWarning] = useState(false);
   const [nextUrl, setNextUrl] = useState('');
   const [exitMessage, setExitMessage] = useState('');
@@ -49,6 +52,7 @@ export default function CustomerNavbar() {
   // Helper: Update Cart Count
   const updateCartCount = () => {
     const cart = loadCart();
+    // Count is the number of distinct items (cart array length)
     setCartItemCount(cart.length); 
   };
 
@@ -80,11 +84,13 @@ export default function CustomerNavbar() {
 
   // --- FIX: Universal Navigation Handler with Exit Check ---
   const handleNavigation = useCallback((e, url, message) => {
+    // 1. If not on checkout page, navigate directly and exit.
     if (router.pathname !== '/checkout') {
       router.push(url);
       return; 
     }
     
+    // 2. If on checkout page, trigger the warning modal.
     // Check if e exists and has preventDefault (only present on synthetic events from link clicks)
     if (e && typeof e.preventDefault === 'function') { 
         e.preventDefault();
@@ -95,11 +101,13 @@ export default function CustomerNavbar() {
     setShowExitWarning(true);
   }, [router.pathname, router]);
   
+  // --- NEW: Confirmed Exit Action ---
   const confirmExit = () => {
       setShowExitWarning(false);
       router.push(nextUrl);
   };
   
+  // Check if user is logged in on mount
   useEffect(() => {
     updateCartCount();
     
@@ -167,8 +175,10 @@ export default function CustomerNavbar() {
     }
   };
 
+  // --- NEW HANDLER for Manual Location Set ---
   const handleManualLocationSet = (locData) => {
     setShowManualModal(false);
+    // Reload handled by ManualLocationModal
   };
   
   const handleAddressSelect = (address) => {
@@ -232,7 +242,7 @@ export default function CustomerNavbar() {
 
           {/* 2. Nav Links */}
           <div className="hidden md:flex items-center gap-6 text-base font-medium text-black/80">
-            {/* Shop Dropdown (unchanged) */}
+            {/* Shop Dropdown */}
             <div className="relative group h-full flex items-center">
               <span className="cursor-pointer hover:text-black transition-colors py-2">Shop</span>
               <div className="absolute top-full left-0 pt-2 w-64 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 ease-in-out z-50">
@@ -244,6 +254,7 @@ export default function CustomerNavbar() {
                         <svg className="w-4 h-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg>
                       </div>
                       <div className="absolute top-0 left-full pl-2 w-56 opacity-0 invisible group-hover/item:opacity-100 group-hover/item:visible transition-all duration-200 ease-in-out">
+                        {/* FIX 4: Added space-y-1 to the inner list container to ensure vertical stacking */}
                         <div className="bg-white rounded-xl shadow-xl border border-gray-100 p-2 space-y-1">
                           <div className="px-4 py-2 text-xs font-bold text-gray-400 uppercase tracking-wider">{category} Collection</div>
                           <div className="h-[1px] bg-gray-100 mx-2 mb-1"></div>
@@ -270,11 +281,11 @@ export default function CustomerNavbar() {
             <Input className="w-full bg-[#F0F0F0] border-none rounded-full pl-12 h-11 text-base focus-visible:ring-1 focus-visible:ring-gray-300 placeholder:text-gray-400" placeholder="Search for products..." />
           </div>
 
-          {/* --- DELIVER TO BUTTON (Now triggers guardrail if on checkout) --- */}
+          {/* --- DELIVER TO BUTTON (Location change still possible from checkout) --- */}
           <Button 
             variant="ghost" 
             className="hidden lg:flex items-center gap-2 px-2 hover:bg-gray-100 rounded-lg h-11"
-            onClick={handleDeliverToClick} 
+            onClick={handleDeliverToClick} // This reloads the page, which is fine as it autofills checkout later
           >
             <MapPin className="h-5 w-5 text-gray-600" />
             <div className="flex flex-col items-start text-left leading-none space-y-0.5">
@@ -292,11 +303,13 @@ export default function CustomerNavbar() {
             <CheckoutAwareLink href="/cart" message="Going back to Cart page. Your progress may be lost.">
               <Button variant="ghost" size="icon" className="relative hover:bg-gray-100 rounded-full w-10 h-10">
                 <ShoppingCart className="h-6 w-6" />
+                {/* --- FIX: Cart Count Bubble (Blue color) --- */}
                 {cartItemCount > 0 && (
                   <span className="absolute top-0 right-0 inline-flex items-center justify-center px-2 py-1 text-xs font-bold leading-none text-white transform translate-x-1/2 -translate-y-1/2 bg-blue-600 rounded-full">
                     {cartItemCount}
                   </span>
                 )}
+                {/* ------------------------------------------- */}
               </Button>
             </CheckoutAwareLink>
 
@@ -322,6 +335,7 @@ export default function CustomerNavbar() {
                     </DropdownMenuLabel>
                     <DropdownMenuSeparator className="bg-gray-100" />
                     <DropdownMenuItem asChild className="rounded-lg focus:bg-gray-50">
+                        {/* Profile/Settings trigger modal on checkout, otherwise navigate immediately via corrected handleNavigation */}
                         <a onClick={(e) => handleNavigation(e, '/profile', "Leaving Checkout page. Your progress may be lost.")} className="cursor-pointer py-2.5 px-4 flex items-center"><User className="mr-3 h-4 w-4 text-gray-500" /> Profile</a>
                     </DropdownMenuItem>
                     <DropdownMenuItem asChild className="rounded-lg focus:bg-gray-50">
