@@ -25,7 +25,7 @@ export default function CustomerNavbar() {
   const router = useRouter();
   const [user, setUser] = useState(null);
   
-  // --- Cart State (NEW: Tracks unique item count) ---
+  // --- Cart State (Tracks unique item count) ---
   const [cartItemCount, setCartItemCount] = useState(0); 
 
   // --- Address & Modal State ---
@@ -90,7 +90,7 @@ export default function CustomerNavbar() {
           const data = await res.json();
           setUser(data.user);
           
-          // --- LOCATION INITIALIZATION LOGIC (unchanged) ---
+          // --- LOCATION INITIALIZATION LOGIC ---
           const savedLoc = localStorage.getItem("livemart_active_location");
           
           if (savedLoc) {
@@ -102,9 +102,6 @@ export default function CustomerNavbar() {
               location: { coordinates: [parsed.lng, parsed.lat] }
             });
           } else if (data.user?.addresses?.length > 0) {
-            // Note: setActiveLocation is NOT called here on initial load to avoid infinite reloads
-            // The Home Page's LocalProducts fetches location on its own initial load.
-            // setActiveLocation is only used when the user INTERACTS with the dropdown/modal.
             setSelectedAddress(data.user.addresses[0]);
           }
         } else {
@@ -145,7 +142,6 @@ export default function CustomerNavbar() {
   // --- NEW HANDLER for Manual Location Set ---
   const handleManualLocationSet = (locData) => {
     // locData is already saved to localStorage and reload is handled in ManualLocationModal
-    // We just close the modal here.
     setShowManualModal(false);
   };
   // ----------------------------------------
@@ -166,14 +162,13 @@ export default function CustomerNavbar() {
   const handleDeliverToClick = () => {
     if (!user) {
       // MODIFIED: Open manual location modal for guests
-      setShowManualModal(true);
+      setShowManualModal(true); //
     } else {
       // Logged in users still open the Customer Address modal for saved addresses
       setIsAddressModalOpen(true);
     }
   };
 
-  // Menu Data (unchanged)
   const categories = ["Men", "Women", "Girls", "Boys"];
   const items = ["Shirts", "T-shirts", "Hoodies", "Sweatshirts", "Jeans", "Shorts", "Tracks"];
 
@@ -187,7 +182,7 @@ export default function CustomerNavbar() {
             LiveMart
           </Link>
 
-          {/* 2. Nav Links (unchanged) */}
+          {/* 2. Nav Links */}
           <div className="hidden md:flex items-center gap-6 text-base font-medium text-black/80">
             <div className="relative group h-full flex items-center">
               <span className="cursor-pointer hover:text-black transition-colors py-2">Shop</span>
@@ -217,13 +212,13 @@ export default function CustomerNavbar() {
             <Link href="/products?sort=newest" className="hover:text-black transition-colors">New Arrivals</Link>
           </div>
 
-          {/* 3. Search Bar (unchanged) */}
+          {/* 3. Search Bar */}
           <div className="flex-1 relative hidden md:block">
             <Search className="absolute left-4 top-1/2 -translate-y-1/2 h-5 w-5 text-gray-400" />
             <Input className="w-full bg-[#F0F0F0] border-none rounded-full pl-12 h-11 text-base focus-visible:ring-1 focus-visible:ring-gray-300 placeholder:text-gray-400" placeholder="Search for products..." />
           </div>
 
-          {/* --- DELIVER TO BUTTON (modified onClick) --- */}
+          {/* --- DELIVER TO BUTTON --- */}
           <Button 
             variant="ghost" 
             className="hidden lg:flex items-center gap-2 px-2 hover:bg-gray-100 rounded-lg h-11"
@@ -240,7 +235,7 @@ export default function CustomerNavbar() {
             </div>
           </Button>
 
-          {/* 4. Icons & Profile Dropdown (unchanged) */}
+          {/* 4. Icons & Profile Dropdown */}
           <div className="flex items-center gap-4">
             <Link href="/cart">
               <Button variant="ghost" size="icon" className="relative hover:bg-gray-100 rounded-full w-10 h-10">

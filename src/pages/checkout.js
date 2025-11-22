@@ -12,6 +12,7 @@ export default function Checkout() {
   const router = useRouter();
 
   useEffect(()=> {
+    // Note: 'lm_cart' is set by cart.js with the correct payload structure (unitPrice is discounted price)
     setCart(JSON.parse(localStorage.getItem("lm_cart") || "[]"));
   }, []);
 
@@ -19,6 +20,7 @@ export default function Checkout() {
     if (!name) return alert("Enter name");
     if (cart.length === 0) return alert("Cart empty");
 
+    // The cart items stored in 'lm_cart' already have the required 'sizeLabel' and 'unitPrice' (discounted price)
     const items = cart.map(i => ({ productId: i.productId, sizeLabel: i.sizeLabel, qty: i.qty }));
     const customer = { name, address, phone };
 
@@ -50,6 +52,7 @@ export default function Checkout() {
 
       // 3) clear cart and navigate to order page
       localStorage.removeItem("lm_cart");
+      localStorage.removeItem("livemart_cart"); // clear the new cart too
       window.dispatchEvent(new Event("storage"));
       router.push(`/order/${order._id}`);
     } catch (e) {
