@@ -220,7 +220,7 @@ export default function CustomerNavbar() {
             </a>
         );
     }
-    return <Link href={href} legacyBehavior {...props}>{children}</Link>;
+    return <Link href={href}  {...props}>{children}</Link>;
   };
 
   return (
