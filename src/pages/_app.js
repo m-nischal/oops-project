@@ -1,13 +1,12 @@
 // src/pages/_app.js
 import '@/styles/globals.css' // Or whatever your CSS file is named
 import React from "react";
-// import LeftSidebar from "../components/LeftSidebar";
+import { SessionProvider } from "next-auth/react";
 
-export default function App({ Component, pageProps }) {
+export default function App({ Component, pageProps: { session, ...pageProps } }) {
   return (
-    <>
-      {/*<LeftSidebar />*/}
+    <SessionProvider session={session}>
       <Component {...pageProps} />
-    </>
+    </SessionProvider>
   );
 }
