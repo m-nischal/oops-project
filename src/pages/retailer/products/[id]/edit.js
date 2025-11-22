@@ -57,14 +57,7 @@ const libraries = ["places"];
 
 // --- COUNTRY DATA ---
 const COUNTRY_DATA = [
-  { country: "Afghanistan", code: "+93", flag: "🇦🇫", lat: 33.9391, lng: 67.7099, iso2: "AF" },
-  { country: "Bangladesh", code: "+880", flag: "🇧🇩", lat: 23.685, lng: 90.3563, iso2: "BD" },
-  { country: "Bhutan", code: "+975", flag: "🇧🇹", lat: 27.5142, lng: 90.4336, iso2: "BT" },
   { country: "India", code: "+91", flag: "🇮🇳", lat: 20.5937, lng: 78.9629, iso2: "IN" },
-  { country: "Maldives", code: "+960", flag: "🇲🇻", lat: 3.2028, lng: 73.2207, iso2: "MV" },
-  { country: "Nepal", code: "+977", flag: "🇳🇵", lat: 28.3949, lng: 84.124, iso2: "NP" },
-  { country: "Pakistan", code: "+92", flag: "🇵🇰", lat: 30.3753, lng: 69.3451, iso2: "PK" },
-  { country: "Sri Lanka", code: "+94", flag: "🇱🇰", lat: 7.8731, lng: 80.7718, iso2: "LK" },
 ].sort((a, b) => a.country.localeCompare(b.country));
 
 // --- Helper to decode user info from token ---
@@ -123,9 +116,9 @@ export default function EditProductPage() {
   const [sizeChartName, setSizeChartName] = useState("");
   const [isPublished, setIsPublished] = useState(false);
   
-  // --- NEW STATE: Track if this product comes from a wholesaler ---
   const [isWholesaleSourced, setIsWholesaleSourced] = useState(false);
 
+  // Helper: Maps a User Profile Address (addressLine1) -> Product Warehouse Format
   const mapAddressToWarehouse = useCallback((address) => {
     if (!address || !address.location || !address.location.coordinates) return null;
     return {
@@ -147,7 +140,8 @@ export default function EditProductPage() {
       return (
         addrLng != null &&
         addrLat != null &&
-        Math.round(addrLng * 1000) === Math.round(lng * 1000)
+        Math.round(addrLng * 1000) === Math.round(lng * 1000) &&
+        Math.round(addrLat * 1000) === Math.round(lat * 1000)
       );
     });
     return match ? match._id.toString() : null;
@@ -225,19 +219,22 @@ export default function EditProductPage() {
         setSizeChartName(product.sizeChart?.chartName || "");
         setExistingSizeChart(product.sizeChart?.image || null);
         setIsPublished(product.isPublished || false);
-
-        // --- CRITICAL: Check if sourced from Wholesaler ---
-        // If wholesaleSourceId exists, it means this product is linked to a wholesaler.
-        // We MUST disable stock editing to ensure inventory integrity.
         setIsWholesaleSourced(!!product.wholesaleSourceId); 
-        // -------------------------------------------------
 
+        // 3. Match and Set Location State
         const productWarehouse = product.warehouses?.[0];
+        
         if (productWarehouse?.location?.coordinates) {
-          setLocationData(mapAddressToWarehouse(productWarehouse));
+          // --- FIX: Use warehouse data DIRECTLY ---
+          // Do not use mapAddressToWarehouse() here because productWarehouse
+          // already has the correct structure (address string, city, etc.)
+          setLocationData(productWarehouse); 
+
+          // Try to find if this matches a saved user address to highlight it in the modal
           const matchId = findMatchingAddressId(productWarehouse, user.addresses || []);
           setSelectedAddressId(matchId || "choose");
         } else if (user.addresses?.length > 0) {
+          // Fallback: Default to first user address if product has no location set
           setSelectedAddressId(user.addresses[0]._id.toString());
           setLocationData(mapAddressToWarehouse(user.addresses[0]));
         } else {
@@ -266,12 +263,9 @@ export default function EditProductPage() {
   const handleSizeChange = (index, field, value) => {
     const newSizes = [...sizes];
     if (field === "stock") {
-        // If it's wholesale sourced, we prevent any stock change here.
-        // Stock must be managed via orders.
         if (isWholesaleSourced) return; 
         newSizes[index][field] = Number(value);
     } else {
-        // Also disable Size Label editing if wholesale sourced to keep variants in sync
         if (field === "size" && isWholesaleSourced) return;
         newSizes[index][field] = value;
     }
@@ -279,7 +273,6 @@ export default function EditProductPage() {
   };
   
   const addSize = () => {
-    // Retailers should not add arbitrary sizes for wholesale items
     setSizes((prev) => [...prev, { size: "New", sku: "", stock: 0 }]);
   };
 
@@ -353,7 +346,7 @@ export default function EditProductPage() {
         discount: Number(discount) || 0,
         brand,
         images: [...existingImages, ...newImageUrls],
-        sizes, // If wholesale, this sends back the unchanged stock numbers
+        sizes, 
         tags,
         sizeChart: { chartName: sizeChartName, image: newSizeChartUrl || existingSizeChart },
         warehouses: [locationData],
@@ -442,7 +435,11 @@ export default function EditProductPage() {
                       <Label>Choose Store Address</Label>
                       <Button type="button" variant="outline" className="w-full justify-between h-12 text-left" onClick={() => setIsAddressModalOpen(true)} disabled={addressesLoading}>
                         {currentAddress && isLocationSet(currentAddress) ? (
-                          <span className="truncate"><span className="font-bold mr-2 text-primary">{currentAddress.address.split(":")[0]}</span>{currentAddress.city}, {currentAddress.country}</span>
+                          <span className="truncate">
+                            {/* Safely handle address string split */}
+                            <span className="font-bold mr-2 text-primary">{(currentAddress.address || "").split(":")[0]}</span>
+                            {currentAddress.city}, {currentAddress.country}
+                          </span>
                         ) : <span className="text-muted-foreground">Click to select...</span>}
                         <MapPin className="w-4 h-4" />
                       </Button>
@@ -484,7 +481,6 @@ export default function EditProductPage() {
                     </div>
                     <div className="col-span-2 space-y-2">
                       <Label>Stock</Label>
-                      {/* --- THE CRITICAL FIX: DISABLE IF WHOLESALE SOURCED --- */}
                       <Input
                         type="number"
                         value={size.stock}
@@ -492,7 +488,6 @@ export default function EditProductPage() {
                         disabled={isWholesaleSourced} 
                         className={isWholesaleSourced ? "bg-gray-100 text-gray-500 font-mono cursor-not-allowed" : ""}
                       />
-                      {/* ----------------------------------------------------- */}
                     </div>
                     <div className="col-span-1">
                       <Button 

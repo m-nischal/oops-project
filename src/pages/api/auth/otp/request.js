@@ -1,4 +1,4 @@
-// pages/api/auth/otp/request.js
+// src/pages/api/auth/otp/request.js
 import dbConnect from "../../../../lib/dbConnect";
 import User from "../../../../models/User";
 import bcrypt from "bcryptjs";
@@ -11,7 +11,7 @@ export default async function handler(req, res) {
   await dbConnect();
   if (req.method !== "POST") return res.status(405).json({ ok: false, message: "Method not allowed" });
 
-  const { email, role } = req.body || {};
+  const { email, role, isRegister } = req.body || {};
   if (!email) return res.status(400).json({ ok: false, message: "Email required" });
 
   try {
@@ -23,6 +23,17 @@ export default async function handler(req, res) {
 
     // find or create user
     let user = await User.findOne({ email: String(email).toLowerCase() });
+    
+    // --- LOGIC VERIFICATION: CHECK EXISTING USER ---
+    if (isRegister && user && user.verified) {
+        // If this is a registration attempt and the user exists + is verified
+        return res.status(409).json({ 
+            ok: false, 
+            message: "Account already exists. Please log in instead." 
+        });
+    }
+    // -----------------------------------------------
+
     if (!user) {
       user = new User({ email: String(email).toLowerCase(), role: role || "CUSTOMER" });
     }
