@@ -1,10 +1,11 @@
+// src/pages/cart.js
 import React, { useEffect, useState, useCallback, useMemo } from "react";
 import Link from "next/link";
 import CustomerNavbar from "@/components/CustomerNavbar";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardFooter } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
-import { Loader2, Trash2, ShoppingCart, Package, MapPin } from "lucide-react";
+import { Loader2, Trash2, ShoppingCart, Package, MapPin, XCircle, AlertTriangle } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -57,6 +58,11 @@ export default function CartPage() {
   
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [itemToDeleteIndex, setItemToDeleteIndex] = useState(null);
+  
+  // --- New Failure State ---
+  const [showFailureModal, setShowFailureModal] = useState(false);
+  const [failureMessage, setFailureMessage] = useState('');
+
 
   // --- Derived Calculations (useMemo) ---
   const itemsWithDetails = useMemo(() => {
@@ -269,6 +275,16 @@ export default function CartPage() {
     return () => window.removeEventListener("livemart-cart-update", handleStorageChange);
   }, [router]);
   
+  // Check for Payment Failure Query Parameter
+  useEffect(() => {
+    if (router.query.paymentFailed) {
+      setFailureMessage(decodeURIComponent(router.query.paymentFailed));
+      setShowFailureModal(true);
+      // Clean up the query parameter in the URL
+      router.replace('/cart', undefined, { shallow: true });
+    }
+  }, [router]);
+  
   useEffect(() => {
     // Fetch details even if cart is empty to confirm state, but optimize inside the function
     if (cart.length > 0) {
@@ -412,6 +428,7 @@ export default function CartPage() {
             </Link>
           </Card>
         </main>
+        <PaymentFailureModal isOpen={showFailureModal} errorMessage={failureMessage} onTryAgain={() => router.push('/checkout')} />
       </div>
     );
   }
@@ -704,6 +721,46 @@ export default function CartPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      
+      {/* Payment Failure Modal (from Checkout Redirect) */}
+      <PaymentFailureModal
+        isOpen={showFailureModal}
+        errorMessage={failureMessage}
+        onTryAgain={() => {
+            setShowFailureModal(false);
+            router.push('/checkout'); 
+        }}
+      />
     </div>
   );
 }
+
+// --- PAYMENT FAILURE MODAL (NEW COMPONENT FOR CART PAGE) ---
+const PaymentFailureModal = ({ isOpen, errorMessage, onTryAgain }) => (
+    <Dialog open={isOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader className="text-center">
+            <div className="flex justify-center mb-2">
+                <XCircle className="h-12 w-12 text-red-500" />
+            </div>
+            <DialogTitle className="text-xl text-red-600">Payment Failed</DialogTitle>
+            <DialogDescription className="text-gray-600">
+              Your recent payment attempt could not be completed.
+            </DialogDescription>
+          </DialogHeader>
+          
+          <div className="space-y-3 py-4 text-center">
+              <p className="text-sm font-medium text-gray-800">Reason:</p>
+              <Alert variant="destructive" className="text-left">
+                  <AlertDescription>{errorMessage || "Payment timed out or invalid details provided."}</AlertDescription>
+              </Alert>
+          </div>
+
+          <DialogFooter className="flex-col sm:flex-row">
+            <Button onClick={onTryAgain} className="w-full bg-black hover:bg-gray-800">
+              Review Cart
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+    </Dialog>
+);
