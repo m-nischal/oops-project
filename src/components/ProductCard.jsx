@@ -1,29 +1,20 @@
+// src/components/ProductCard.jsx
 import React from "react";
 import Link from "next/link";
 import { Card, CardContent } from "@/components/ui/card";
-import { Star, StarHalf } from "lucide-react";
+// REMOVED: import { Star, StarHalf } from "lucide-react";
+import StarRating from "@/components/StarRating"; // <--- ADDED IMPORT
 
-// Helper to render stars
-function StarRating({ rating }) {
-  const fullStars = Math.floor(rating);
-  const hasHalfStar = rating % 1 !== 0;
-  
-  return (
-    <div className="flex items-center gap-1">
-      {[...Array(fullStars)].map((_, i) => (
-        <Star key={i} className="w-4 h-4 fill-yellow-400 text-yellow-400" />
-      ))}
-      {hasHalfStar && <StarHalf className="w-4 h-4 fill-yellow-400 text-yellow-400" />}
-      <span className="text-sm text-gray-600 ml-1">{rating}/5</span>
-    </div>
-  );
-}
+// REMOVED: The obsolete local StarRating helper is no longer included.
 
 export default function ProductCard({ product, label }) {
-  // Calculate average rating from reviews (if any), default to 4.5 for demo
-  const rating = product.reviews?.length 
-    ? (product.reviews.reduce((acc, r) => acc + r.rating, 0) / product.reviews.length).toFixed(1)
-    : "4.5"; 
+  // Calculate average rating and count from reviews. Default to 0 if none.
+  const reviewCount = product.reviews?.length || 0;
+  const rawRating = reviewCount 
+    ? (product.reviews.reduce((acc, r) => acc + r.rating, 0) / reviewCount)
+    : 0; 
+
+  const rating = rawRating.toFixed(1); 
 
   return (
     <Link href={`/product/${product._id}`} className="group">
@@ -46,7 +37,10 @@ export default function ProductCard({ product, label }) {
              
           </div>
           <h3 className="font-bold text-lg truncate mb-1 group-hover:text-primary">{product.name}</h3>
-          <StarRating rating={Number(rating)} />
+          
+          {/* --- MODIFIED: Pass calculated rating and count to centralized component --- */}
+          <StarRating rating={Number(rating)} reviewCount={reviewCount} />
+          
           <div className="mt-2 flex items-center gap-3">
              <span className="font-bold text-xl">₹{product.price?.toLocaleString('en-IN')}</span>
              {product.discount > 0 && (

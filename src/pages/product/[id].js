@@ -64,6 +64,13 @@ function getCart() {
 }
 function saveCart(cart) { localStorage.setItem("livemart_cart", JSON.stringify(cart)); }
 
+// NEW HELPER: Find an item in the cart
+function getCartItem(productId, sizeLabel) {
+    const cart = getCart();
+    return cart.find(i => String(i.productId) === String(productId) && String(i.size) === String(sizeLabel));
+}
+
+
 // Helper to format price
 const formatPrice = (p) => `₹${Number(p || 0).toLocaleString('en-IN')}`;
 
@@ -268,20 +275,34 @@ export default function ProductDetailPage() {
         setMainImage(p.images && p.images[0] ? p.images[0] : "/images/placeholder.png");
 
         const sizes = p?.sizes || [];
-        if (sizes && sizes.length) {
-          const first = sizes[0];
-          const label = sizeLabelOf(first);
-          setSelectedSize(label);
-          setSelectedSizeStock(Number(first.stock || 0));
-          setQty(1);
-          prevQtyRef.current = 1;
+        const initialSize = sizes && sizes.length ? sizes[0] : null;
+        const initialSizeLabel = initialSize ? sizeLabelOf(initialSize) : null;
+
+        // --- NEW/FIXED LOGIC START (Initialize QTY to Cart QTY) ---
+        let defaultQty = 1;
+        let defaultStock = initialSize ? Number(initialSize.stock || 0) : totalStockFrom(p);
+
+        if (initialSizeLabel) {
+            const currentCartItem = getCartItem(p._id, initialSizeLabel);
+            if (currentCartItem) {
+                // If item is in cart, initialize QTY input to the quantity already in cart
+                defaultQty = currentCartItem.qty; 
+            }
+        }
+        
+        // Final state setup
+        if (initialSize) {
+          setSelectedSize(initialSizeLabel);
+          setSelectedSizeStock(defaultStock); 
         } else {
           setSelectedSize(null);
-          setSelectedSizeStock(totalStockFrom(p));
-          setQty(1);
-          prevQtyRef.current = 1;
+          setSelectedSizeStock(defaultStock);
         }
-
+        
+        setQty(defaultQty); // Initialize QTY to what's in the cart or 1
+        prevQtyRef.current = defaultQty;
+        // --- NEW/FIXED LOGIC END ---
+        
         setSizeImage(sizeChartImageFor(p));
         
         // --- Init Location: Use combined logic ---
@@ -321,68 +342,107 @@ export default function ProductDetailPage() {
   };
   
 
-  // ... (rest of the component functions remain unchanged) ...
+  // --- FIXED QTY HANDLERS ---
+  const handleSizeChange = (newSizeLabel) => {
+    setSelectedSize(newSizeLabel);
+    
+    // 1. Update max stock for the newly selected size
+    const newSize = product.sizes.find(s => sizeLabelOf(s) === newSizeLabel);
+    const newStock = newSize ? Number(newSize.stock || 0) : 0;
+    setSelectedSizeStock(newStock);
+
+    // 2. Update QTY input to reflect what's currently in the cart for this size
+    const currentCartItem = getCartItem(product._id, newSizeLabel);
+    const cartQty = currentCartItem ? currentCartItem.qty : 1;
+    setQty(cartQty);
+    prevQtyRef.current = cartQty;
+  }
+  
   const handleQtyChange = (e) => {
     let newQty = Number(e.target.value);
-    const maxStock = selectedSize ? selectedSizeStock : totalStockFrom(product);
+    const maxStock = selectedSize ? selectedSizeStock : totalStockFrom(product); // This is the absolute limit
 
     if (isNaN(newQty)) {
-        newQty = 1;
+        newQty = prevQtyRef.current; // Revert to previous valid quantity if input is NaN
     }
+    
     newQty = Math.floor(Math.max(1, newQty));
     
     if (newQty > maxStock) {
-        alert(`Quantity cannot exceed available stock (${maxStock}).`);
+        alert(`Maximum available units for this product is ${maxStock}.`);
         newQty = maxStock;
     }
     
     setQty(newQty);
-    prevQtyRef.current = newQty;
+    prevQtyRef.current = newQty; // Update ref for next invalid input
   }
   
   function incrementQty() {
     const newQty = Number(qty || 0) + 1;
     const maxStock = selectedSize ? selectedSizeStock : totalStockFrom(product);
+    
     if (newQty > maxStock) {
-        alert(`Only ${maxStock} units available.`);
+        alert(`Only ${maxStock} units available in total.`);
         return;
     }
     setQty(newQty);
     prevQtyRef.current = newQty;
   }
+  
   function decrementQty() {
     const newQty = Math.max(1, Number(qty || 0) - 1);
     setQty(newQty);
     prevQtyRef.current = newQty;
   }
+  
   async function handleAddToCart() {
     if (!product) { alert("Product not loaded"); return; }
-    const desiredQty = Number(qty) || 1;
+    
+    const desiredTotalQty = Number(qty) || 1; // The value from the input field
     setAdding(true);
+    
     try {
       const cart = getCart();
-      const pid = String(product._id || product._id);
-      const existing = cart.find(i => i.productId === pid && i.size === selectedSize);
+      const pid = String(product._id || product.id);
+      const sizeLabel = selectedSize;
 
-      if (existing) {
-        existing.qty = Math.min(existing.qty + desiredQty, 999);
+      if (!sizeLabel) { alert("Please select a size."); return; }
+
+      const existingIndex = cart.findIndex(i => String(i.productId) === pid && String(i.size) === sizeLabel);
+      
+      
+      if (desiredTotalQty === 0) {
+          // If qty is 0, remove it from cart
+          if (existingIndex > -1) {
+              cart.splice(existingIndex, 1);
+          }
+      } else if (existingIndex > -1) {
+          // Item exists: Update the quantity to the desired total
+          cart[existingIndex].qty = desiredTotalQty;
       } else {
-        cart.push({
-          productId: pid,
-          name: product.name,
-          price: product.price,
-          size: selectedSize,
-          qty: desiredQty,
-          image: product.images && product.images[0]
-        });
+          // Item does not exist: Add it with the desired quantity
+          cart.push({
+              productId: pid,
+              name: product.name,
+              price: product.price,
+              size: sizeLabel,
+              qty: desiredTotalQty,
+              image: product.images && product.images[0]
+          });
       }
+      
+      // Filter out any items that ended up with qty <= 0 (e.g., if validation was used)
+      const newCart = cart.filter(i => i.qty > 0);
 
-      saveCart(cart);
-      try { window.dispatchEvent(new Event("storage")); } catch (e) { /* ignore */ }
-
+      saveCart(newCart);
+      
       setJustAdded(true);
-      setAddedCount(desiredQty);
+      setAddedCount(desiredTotalQty); // Show the final quantity for clarity
       setTimeout(() => { setJustAdded(false); }, 3500);
+      
+      // If the cart was modified, trigger updates
+      try { window.dispatchEvent(new Event("storage")); } catch (e) { /* ignore */ }
+      
     } catch (err) {
       console.error(err);
       alert("Error adding to cart");
@@ -390,6 +450,8 @@ export default function ProductDetailPage() {
       setAdding(false);
     }
   }
+
+  // --- END FIXED QTY HANDLERS ---
   
   const getDeliveryDate = () => {
     if (!deliveryEstimate || !deliveryEstimate.estimatedDays) return "N/A";
@@ -555,7 +617,7 @@ export default function ProductDetailPage() {
                       <Button
                         key={label}
                         variant={isSelected ? "default" : "outline"}
-                        onClick={() => { setSelectedSize(label); setQty(1); }}
+                        onClick={() => handleSizeChange(label)}
                         disabled={stock <= 0}
                         className={`font-semibold ${stock <= 0 ? 'opacity-50 cursor-not-allowed' : ''} h-12 w-16`}
                       >
@@ -638,11 +700,11 @@ export default function ProductDetailPage() {
                     </Alert>
                 )}
 
-                {/* Confirmation UI (unchanged) */}
+                {/* Confirmation UI (updated message) */}
                 {justAdded && (
                     <div className="p-4 bg-green-50 text-green-700 border border-green-200 rounded-md flex justify-between items-center">
                         <div>
-                            <strong>{addedCount}</strong> item{addedCount > 1 ? "s" : ""} added to cart.
+                            <strong>{addedCount}</strong> item{addedCount > 1 ? "s" : ""} now in cart.
                         </div>
                         <Link href="/cart">
                           <Button variant="outline" size="sm" className="bg-green-100 text-green-700 border-green-300 hover:bg-green-200">

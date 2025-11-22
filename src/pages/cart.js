@@ -59,6 +59,11 @@ export default function CartPage() {
   const [user, setUser] = useState(null); // To determine which modal to open
   const [isAddressModalOpen, setIsAddressModalOpen] = useState(false); // For logged-in users
   const [showManualModal, setShowManualModal] = useState(false); // For guests/temporary location
+  const [showLoginPrompt, setShowLoginPrompt] = useState(false); // Added for checkout prompt
+  
+  // New state for item deletion modal
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [itemToDeleteIndex, setItemToDeleteIndex] = useState(null);
   // <-------------------------------->
 
   // --- Derived Calculations (useMemo) ---
@@ -142,7 +147,6 @@ export default function CartPage() {
       window.location.reload(); 
     }
   }, []);
-
 
   // <--- NEW HANDLERS: Match Navbar functionality --->
   const handleDeliverToClick = () => {
@@ -360,31 +364,42 @@ export default function CartPage() {
     if (typeof window !== 'undefined') window.dispatchEvent(new Event('livemart-cart-update'));
   }, [cart, itemsWithDetails]);
 
-  // **Corrected Delete Button Logic**
-  const handleRemoveItem = useCallback((index) => {
-    // Only proceed if the user confirms (window.confirm returns true)
-    if (!window.confirm("Are you sure you want to remove this item from your cart?")) {
-      return;
-    }
-    
-    const newCart = cart.filter((_, idx) => idx !== index);
+  // **New Function to Handle Actual Deletion (called by modal)**
+  const confirmRemoval = useCallback(() => {
+    if (itemToDeleteIndex === null) return;
+
+    const newCart = cart.filter((_, idx) => idx !== itemToDeleteIndex);
     setCart(newCart);
     saveCart(newCart);
-    
-    // No redirection here. The UI will update to show the empty cart message.
 
     if (typeof window !== 'undefined') window.dispatchEvent(new Event('livemart-cart-update'));
-    
-    // Re-fetch delivery data if cart contents changed significantly
-    fetchDeliveryFee(newCart, customerLocation); 
-  }, [cart, fetchDeliveryFee, customerLocation]);
+
+    fetchDeliveryFee(newCart, customerLocation);
+
+    setShowDeleteConfirm(false);
+    setItemToDeleteIndex(null);
+  }, [cart, itemToDeleteIndex, fetchDeliveryFee, customerLocation]);
+
+  // **Updated handleRemoveItem to show modal**
+  const handleRemoveItem = useCallback((index) => {
+    setItemToDeleteIndex(index);
+    setShowDeleteConfirm(true);
+  }, []);
 
 
   const handleGoToCheckout = () => {
+    // 1. Pre-checkout validation
     if (!isCartValidForCheckout) {
         alert("Please resolve all out-of-stock items and ensure a location is selected before proceeding.");
         return;
     }
+    
+    // **NEW AUTH CHECK START**
+    if (!user || user.role !== "CUSTOMER") {
+        setShowLoginPrompt(true); // Show modal instead of alert/redirect
+        return;
+    }
+    // **NEW AUTH CHECK END**
     
     // Pass the calculated discounted price (subtotalAfterDiscount / qty) as unitPrice
     // for compatibility with the old checkout API route logic (OrderService.createOrder)
@@ -504,12 +519,12 @@ export default function CartPage() {
                     <div className="flex-1 space-y-1">
                       <div className="flex justify-between items-start">
                          <h3 className="font-bold text-lg truncate pr-8">{item.name}</h3>
-                         {/* Delete Button (Top Right of row) */}
+                         {/* Delete Button (Top Right of row) - MODIFIED TO TRIGGER MODAL */}
                          <Button 
                              variant="ghost" 
                              size="icon-sm" 
-                             onClick={() => handleRemoveItem(index)}
-                             className="text-gray-500 hover:text-red-600 shrink-0"
+                             onClick={() => handleRemoveItem(index)} // Now sets index and shows modal
+                             className="text-red-600 hover:bg-red-50 hover:text-red-700 shrink-0" 
                          >
                              <Trash2 className="h-5 w-5" />
                          </Button>
@@ -691,8 +706,7 @@ export default function CartPage() {
       </Dialog>
 
 
-      {/* <--- MODALS ADDED ---> */}
-      {/* Address Modal for Logged In Users */}
+      {/* <--- MODALS ADDED --- (CustomerAddressModal and ManualLocationModal unchanged) */}
       {user && (
         <CustomerAddressModal 
           isOpen={isAddressModalOpen} 
@@ -703,13 +717,58 @@ export default function CartPage() {
         />
       )}
         
-      {/* Manual Location Modal (For guests or temporary location) */}
       <ManualLocationModal 
         isOpen={showManualModal} 
         onClose={() => setShowManualModal(false)}
         onLocationSet={handleManualLocationSet}
       />
-      {/* <----------------------> */}
+      
+      {/* --- LOGIN PROMPT MODAL (NEW) --- */}
+      <Dialog open={showLoginPrompt} onOpenChange={setShowLoginPrompt}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Login Required</DialogTitle>
+            <DialogDescription>
+              Please log in as a customer to proceed to the checkout and place your order.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="py-2">
+              <p className="text-center text-sm text-muted-foreground">
+                  Only authenticated customers can finalize orders.
+              </p>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowLoginPrompt(false)}>
+              Stay on Cart
+            </Button>
+            <Button onClick={() => router.push("/login")} className="bg-black text-white hover:bg-gray-800">
+              Login Now
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      {/* ---------------------------------- */}
+
+      {/* --- DELETE CONFIRMATION MODAL (NEW) --- */}
+      <Dialog open={showDeleteConfirm} onOpenChange={setShowDeleteConfirm}>
+        <DialogContent className="sm:max-w-xs">
+          <DialogHeader>
+            <DialogTitle className="text-red-600">Remove Item?</DialogTitle>
+            <DialogDescription>
+              Are you sure you want to remove this item from your cart?
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="mt-4">
+            <Button variant="outline" onClick={() => setShowDeleteConfirm(false)}>
+              Cancel
+            </Button>
+            <Button variant="destructive" onClick={confirmRemoval}>
+              Yes, Remove
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      {/* -------------------------------------- */}
     </div>
   );
 }

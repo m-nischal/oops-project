@@ -1,8 +1,8 @@
-// src/components/CustomerNavbar.jsx
+// src/components/CheckoutNavbar.jsx
 import React, { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
 import { useRouter } from "next/router";
-import { Search, ShoppingCart, User, LogOut, Settings, UserCircle, MapPin, LogIn, UserPlus } from "lucide-react";
+import { Search, ShoppingCart, User, LogOut, Settings, UserCircle, MapPin, LogIn, UserPlus, AlertTriangle } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import {
@@ -20,7 +20,7 @@ import {
   DialogTitle,
   DialogDescription,
   DialogFooter,
-} from "@/components/ui/dialog"; // Import Dialog components
+} from "@/components/ui/dialog";
 import CustomerAddressModal from "@/components/CustomerAddressModal";
 import ManualLocationModal from "@/components/ManualLocationModal";
 
@@ -33,23 +33,22 @@ export default function CustomerNavbar() {
   const router = useRouter();
   const [user, setUser] = useState(null);
   
-  // --- Cart State (Tracks unique item count) ---
   const [cartItemCount, setCartItemCount] = useState(0); 
 
-  // --- Address & Modal State ---
   const [isAddressModalOpen, setIsAddressModalOpen] = useState(false);
   const [selectedAddress, setSelectedAddress] = useState(null);
   const [showManualModal, setShowManualModal] = useState(false);
 
-  // --- Checkout Exit Warning State ---
   const [showExitWarning, setShowExitWarning] = useState(false);
   const [nextUrl, setNextUrl] = useState('');
   const [exitMessage, setExitMessage] = useState('');
 
+  // --- NEW: Checkout Guardrail Modal State ---
+  const [showCheckoutGuardrail, setShowCheckoutGuardrail] = useState(false); 
+
   // Helper: Update Cart Count
   const updateCartCount = () => {
     const cart = loadCart();
-    // Count is the number of distinct items (cart array length)
     setCartItemCount(cart.length); 
   };
 
@@ -57,7 +56,7 @@ export default function CustomerNavbar() {
   const setActiveLocation = (addressObj) => {
     if (!addressObj) return;
     
-    // Extract standard format
+    // 1. Save minimal location data
     const locData = {
       city: addressObj.city,
       pincode: addressObj.pincode,
@@ -65,30 +64,25 @@ export default function CustomerNavbar() {
       lat: addressObj.location?.coordinates?.[1],
       lng: addressObj.location?.coordinates?.[0]
     };
-
-    // Save to persistent storage
     localStorage.setItem("livemart_active_location", JSON.stringify(locData));
     
-    // Update State
+    // 2. Save full address object
+    localStorage.setItem("livemart_active_address_full", JSON.stringify(addressObj));
+    
+    // 3. Update State & Notify
     setSelectedAddress(addressObj);
 
-    // Notify other components (like LocalProducts)
     if (typeof window !== "undefined") {
       window.dispatchEvent(new Event("livemart-location-update"));
-      // --- MODIFIED: Force reload after setting saved location ---
       window.location.reload(); 
-      // ----------------------------------------------------
     }
   };
 
-  // --- NEW: Universal Navigation Handler with Exit Check ---
   const handleNavigation = useCallback((e, url, message) => {
-    // If not on checkout page, proceed normally
     if (router.pathname !== '/checkout') {
       return; 
     }
     
-    // For local links, prevent default and trigger modal
     if (e.type === 'click' && e.currentTarget.tagName.toLowerCase() === 'a') {
         e.preventDefault();
     }
@@ -98,13 +92,11 @@ export default function CustomerNavbar() {
     setShowExitWarning(true);
   }, [router.pathname]);
   
-  // --- NEW: Confirmed Exit Action ---
   const confirmExit = () => {
       setShowExitWarning(false);
       router.push(nextUrl);
   };
   
-  // Check if user is logged in on mount
   useEffect(() => {
     updateCartCount();
     
@@ -122,16 +114,11 @@ export default function CustomerNavbar() {
           const data = await res.json();
           setUser(data.user);
           
-          const savedLoc = localStorage.getItem("livemart_active_location");
+          const savedFullAddress = localStorage.getItem("livemart_active_address_full");
           
-          if (savedLoc) {
-            const parsed = JSON.parse(savedLoc);
-            setSelectedAddress({
-              city: parsed.city,
-              pincode: parsed.pincode,
-              addressLine1: parsed.addressLine1,
-              location: { coordinates: [parsed.lng, parsed.lat] }
-            });
+          if (savedFullAddress) {
+            const parsed = JSON.parse(savedFullAddress);
+            setSelectedAddress(parsed);
           } else if (data.user?.addresses?.length > 0) {
             setSelectedAddress(data.user.addresses[0]);
           }
@@ -160,7 +147,6 @@ export default function CustomerNavbar() {
   }, [router]);
 
   const handleLogout = async () => {
-    // If on checkout, trigger warning, otherwise logout immediately
     if (router.pathname === '/checkout') {
         handleNavigation({ type: 'click' }, '/login', "Leaving Checkout page. Your progress may be lost.");
         return;
@@ -168,6 +154,7 @@ export default function CustomerNavbar() {
     try {
       await fetch("/api/auth/logout", { method: "POST" });
       localStorage.removeItem("token");
+      localStorage.removeItem("livemart_active_address_full");
       setUser(null);
       router.push("/login");
     } catch (e) {
@@ -175,10 +162,8 @@ export default function CustomerNavbar() {
     }
   };
 
-  // --- NEW HANDLER for Manual Location Set ---
   const handleManualLocationSet = (locData) => {
     setShowManualModal(false);
-    // Reload handled by ManualLocationModal
   };
   
   const handleAddressSelect = (address) => {
@@ -193,13 +178,20 @@ export default function CustomerNavbar() {
     }
   };
 
+  // --- FIX: Guardrail for 'Deliver to' button when on checkout page ---
   const handleDeliverToClick = () => {
+    if (router.pathname === '/checkout') {
+        setShowCheckoutGuardrail(true); // Trigger the custom guardrail dialog
+        return;
+    }
+
     if (!user) {
       setShowManualModal(true);
     } else {
       setIsAddressModalOpen(true);
     }
   };
+  // ------------------------------------------------------------------
 
   const categories = ["Men", "Women", "Girls", "Boys"];
   const items = ["Shirts", "T-shirts", "Hoodies", "Sweatshirts", "Jeans", "Shorts", "Tracks"];
@@ -235,7 +227,7 @@ export default function CustomerNavbar() {
 
           {/* 2. Nav Links */}
           <div className="hidden md:flex items-center gap-6 text-base font-medium text-black/80">
-            {/* Shop Dropdown */}
+            {/* Shop Dropdown (unchanged) */}
             <div className="relative group h-full flex items-center">
               <span className="cursor-pointer hover:text-black transition-colors py-2">Shop</span>
               <div className="absolute top-full left-0 pt-2 w-64 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 ease-in-out z-50">
@@ -247,7 +239,6 @@ export default function CustomerNavbar() {
                         <svg className="w-4 h-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg>
                       </div>
                       <div className="absolute top-0 left-full pl-2 w-56 opacity-0 invisible group-hover/item:opacity-100 group-hover/item:visible transition-all duration-200 ease-in-out">
-                        {/* FIX 4: Added space-y-1 to the inner list container to ensure vertical stacking */}
                         <div className="bg-white rounded-xl shadow-xl border border-gray-100 p-2 space-y-1">
                           <div className="px-4 py-2 text-xs font-bold text-gray-400 uppercase tracking-wider">{category} Collection</div>
                           <div className="h-[1px] bg-gray-100 mx-2 mb-1"></div>
@@ -274,11 +265,11 @@ export default function CustomerNavbar() {
             <Input className="w-full bg-[#F0F0F0] border-none rounded-full pl-12 h-11 text-base focus-visible:ring-1 focus-visible:ring-gray-300 placeholder:text-gray-400" placeholder="Search for products..." />
           </div>
 
-          {/* --- DELIVER TO BUTTON (Location change still possible from checkout) --- */}
+          {/* --- DELIVER TO BUTTON (Now triggers guardrail if on checkout) --- */}
           <Button 
             variant="ghost" 
             className="hidden lg:flex items-center gap-2 px-2 hover:bg-gray-100 rounded-lg h-11"
-            onClick={handleDeliverToClick} // This reloads the page, which is fine as it autofills checkout later
+            onClick={handleDeliverToClick} 
           >
             <MapPin className="h-5 w-5 text-gray-600" />
             <div className="flex flex-col items-start text-left leading-none space-y-0.5">
@@ -296,13 +287,11 @@ export default function CustomerNavbar() {
             <CheckoutAwareLink href="/cart" message="Going back to Cart page. Your progress may be lost.">
               <Button variant="ghost" size="icon" className="relative hover:bg-gray-100 rounded-full w-10 h-10">
                 <ShoppingCart className="h-6 w-6" />
-                {/* --- FIX: Cart Count Bubble (Blue color) --- */}
                 {cartItemCount > 0 && (
                   <span className="absolute top-0 right-0 inline-flex items-center justify-center px-2 py-1 text-xs font-bold leading-none text-white transform translate-x-1/2 -translate-y-1/2 bg-blue-600 rounded-full">
                     {cartItemCount}
                   </span>
                 )}
-                {/* ------------------------------------------- */}
               </Button>
             </CheckoutAwareLink>
 
@@ -328,7 +317,6 @@ export default function CustomerNavbar() {
                     </DropdownMenuLabel>
                     <DropdownMenuSeparator className="bg-gray-100" />
                     <DropdownMenuItem asChild className="rounded-lg focus:bg-gray-50">
-                        {/* Profile/Settings trigger modal on checkout */}
                         <a onClick={(e) => handleNavigation(e, '/profile', "Leaving Checkout page. Your progress may be lost.")} className="cursor-pointer py-2.5 px-4 flex items-center"><User className="mr-3 h-4 w-4 text-gray-500" /> Profile</a>
                     </DropdownMenuItem>
                     <DropdownMenuItem asChild className="rounded-lg focus:bg-gray-50">
@@ -392,7 +380,27 @@ export default function CustomerNavbar() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-      {/* ------------------------------------------- */}
+      
+      {/* --- Checkout Guardrail Dialog --- */}
+      <Dialog open={showCheckoutGuardrail} onOpenChange={setShowCheckoutGuardrail}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center text-red-600">
+                <AlertTriangle className="h-5 w-5 mr-2" />
+                Action Blocked
+            </DialogTitle>
+            <DialogDescription>
+              To prevent data loss, delivery location changes must be managed using the 
+              **'Change Address / Location'** button located on the right side of the checkout page.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button onClick={() => setShowCheckoutGuardrail(false)} className="bg-black">
+              Got It
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </>
   );
 }
