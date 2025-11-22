@@ -25,7 +25,7 @@ export default async function handler(req, res) {
     }
 
     if (!user.password) {
-      return res.status(401).json({ ok: false, message: "No password set for this account. Please use OTP login." });
+      return res.status(401).json({ ok: false, message: "No password set for this account. Please use social login." });
     }
 
     const passwordMatches = await bcrypt.compare(password, user.password);
