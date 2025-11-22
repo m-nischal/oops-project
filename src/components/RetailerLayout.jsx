@@ -89,7 +89,7 @@ export default function RetailerLayout({ children }) {
           </NavLink>
           <Separator className="bg-gray-700" />
           <NavLink href="/retailer/stock" icon={ShoppingBag}>
-            STOCK FROM WHOLESALER
+            WHOLESALER MARKETPLACE
           </NavLink>
         </nav>
       </aside>
