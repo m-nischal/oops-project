@@ -1,17 +1,6 @@
 // src/services/inventory.js
 import mongoose from "mongoose";
-import Product from "models/Product.js";
-
-/**
- * InventoryService
- *
- * - All operations accept an optional mongoose session for transactional safety.
- * - decreaseStockForItems attempts to decrement each product-size atomically and
- *   throws InsufficientStockError if any item cannot be satisfied.
- *
- * Note: callers (OrderService.createOrder, refund flows) should start a session
- * and transaction when they want the whole operation to be atomic.
- */
+import Product from "../models/Product.js";
 
 /** Base error for inventory operations */
 class InventoryError extends Error {}
@@ -51,88 +40,79 @@ export default class InventoryService {
 
   /**
    * Decrease stock for a specific product size by qty.
-   * If a mongoose session is provided, the update participates in the transaction.
-   * Uses positional $ operator to decrement correct array element.
-   * @param {String|ObjectId} productId
+   * - Tries strict decrement first (stock >= qty).
+   * - If strict fails, checks if product is a Proxy (linked to Wholesaler).
+   * - If Proxy, allows decrement into negative stock (Backorder).
+   * * @param {String|ObjectId} productId
    * @param {String} sizeLabel
    * @param {Number} qty
    * @param {mongoose.ClientSession} [session]
-   * @returns {Promise<boolean>} true if modified, throws InsufficientStockError otherwise
+   * @returns {Promise<boolean>} true if modified
    * @throws {InvalidParamsError|InsufficientStockError}
    */
   static async decreaseStock(productId, sizeLabel, qty, session = null) {
     const params = this._validateParams(productId, sizeLabel, qty);
+    const update = { $inc: { "sizes.$.stock": -params.qty } };
+    const options = session ? { session } : {};
 
-    // Filter ensures size exists and has enough stock
-    const filter = {
+    // 1. Try STRICT decrement (Standard behavior: Must have enough stock)
+    const strictFilter = {
       _id: params.productId,
       "sizes.size": params.sizeLabel,
       "sizes.stock": { $gte: params.qty }
     };
 
-    const update = { $inc: { "sizes.$.stock": -params.qty } };
-    const options = {};
-    if (session) options.session = session;
+    const res = await Product.updateOne(strictFilter, update, options);
+    
+    // If strict update succeeded, we are done.
+    if ((res.modifiedCount ?? res.nModified ?? 0) > 0) return true;
 
-    const res = await Product.updateOne(filter, update, options);
-    const modified = (res.modifiedCount ?? res.nModified ?? 0) > 0;
-
-    if (!modified) {
-      // fetch current available stock for better error message
-      const current = await Product.findOne(
-        { _id: params.productId, "sizes.size": params.sizeLabel },
-        { "sizes.$": 1 }
-      ).session(session).lean();
-
-      const available = current && current.sizes && current.sizes[0] ? Number(current.sizes[0].stock || 0) : 0;
-      throw new InsufficientStockError(`Insufficient stock for product ${params.productId} size ${params.sizeLabel}. Requested ${params.qty}, available ${available}`);
+    // 2. If failed, check if it's a PROXY PRODUCT (Linked to Wholesaler)
+    // We need to fetch the doc to check 'wholesaleSourceId'
+    const product = await Product.findById(params.productId).session(session).select("wholesaleSourceId name").lean();
+    
+    if (product && product.wholesaleSourceId) {
+        // It is a proxy item! Allow "Backorder" (Stock becomes negative).
+        // Remove the $gte check from the filter.
+        const forceFilter = { 
+            _id: params.productId, 
+            "sizes.size": params.sizeLabel 
+        };
+        
+        const forceRes = await Product.updateOne(forceFilter, update, options);
+        
+        if ((forceRes.modifiedCount ?? forceRes.nModified ?? 0) > 0) return true;
     }
 
-    // defensive post-check: ensure new stock is not negative
-    const post = await Product.findOne(
+    // 3. Real Failure (Not enough stock AND not a proxy item, or size doesn't exist)
+    // Fetch current stock for a better error message
+    const current = await Product.findOne(
       { _id: params.productId, "sizes.size": params.sizeLabel },
       { "sizes.$": 1 }
     ).session(session).lean();
 
-    const newStock = post && post.sizes && post.sizes[0] ? Number(post.sizes[0].stock || 0) : 0;
-    if (newStock < 0) {
-      throw new InsufficientStockError(`Post-update stock negative (${newStock}) for product ${params.productId} size ${params.sizeLabel}`);
-    }
-
-    return true;
+    const available = current && current.sizes && current.sizes[0] ? Number(current.sizes[0].stock || 0) : 0;
+    throw new InsufficientStockError(`Insufficient stock for product ${params.productId} size ${params.sizeLabel}. Requested ${params.qty}, available ${available}`);
   }
 
   /**
    * Increase stock for a specific product size by qty (restock/cancel).
    * Returns true if an existing size was updated, false if not found (size missing).
    * Use addOrCreateSize to add a missing size.
-   * @param {String|ObjectId} productId
-   * @param {String} sizeLabel
-   * @param {Number} qty
-   * @param {mongoose.ClientSession} [session]
-   * @returns {Promise<boolean>}
    */
   static async increaseStock(productId, sizeLabel, qty, session = null) {
     const params = this._validateParams(productId, sizeLabel, qty);
 
     const filter = { _id: params.productId, "sizes.size": params.sizeLabel };
     const update = { $inc: { "sizes.$.stock": params.qty } };
-    const options = {};
-    if (session) options.session = session;
+    const options = session ? { session } : {};
 
     const res = await Product.updateOne(filter, update, options);
     const modified = (res.modifiedCount ?? res.nModified ?? 0) > 0;
 
     if (modified) {
-      // post-check to ensure validators didn't allow a bad state
-      const post = await Product.findOne(
-        { _id: params.productId, "sizes.size": params.sizeLabel },
-        { "sizes.$": 1 }
-      ).session(session).lean();
-      const newStock = post && post.sizes && post.sizes[0] ? Number(post.sizes[0].stock || 0) : 0;
-      if (newStock < 0) {
-        throw new InventoryError(`Post-increase stock negative (${newStock}) for product ${params.productId} size ${params.sizeLabel}`);
-      }
+      // We don't check for negative stock here because increasing stock is always safe 
+      // (even if it goes from -5 to -4, that's valid logic).
       return true;
     }
 
@@ -142,12 +122,6 @@ export default class InventoryService {
 
   /**
    * Add a new size entry if it doesn't exist, or set the stock if it does.
-   * @param {String|ObjectId} productId
-   * @param {String} sizeLabel
-   * @param {Number} qty
-   * @param {mongoose.ClientSession} [session]
-   * @returns {Promise<void>}
-   * @throws {InvalidParamsError}
    */
   static async addOrCreateSize(productId, sizeLabel, qty = 0, session = null) {
     if (!productId) throw new InvalidParamsError("productId is required");
@@ -175,9 +149,6 @@ export default class InventoryService {
 
   /**
    * Get stock for a specific size. Returns 0 if product or size not found.
-   * @param {String|ObjectId} productId
-   * @param {String} sizeLabel
-   * @returns {Promise<number>}
    */
   static async getStock(productId, sizeLabel) {
     if (!productId) throw new InvalidParamsError("productId is required");
@@ -192,8 +163,6 @@ export default class InventoryService {
 
   /**
    * Returns total stock across all sizes for the product (integer).
-   * @param {String|ObjectId} productId
-   * @returns {Promise<number>}
    */
   static async totalStock(productId) {
     if (!productId) throw new InvalidParamsError("productId is required");
@@ -204,10 +173,9 @@ export default class InventoryService {
 
   /**
    * Decrease stock for multiple items inside a session/transaction.
-   * This method expects a mongoose session that has had startTransaction called.
-   * It will throw InsufficientStockError if any individual decrement cannot be applied.
-   *
-   * @param {Array<{productId: string, sizeLabel: string, qty: number}>} items
+   * Used by OrderService.createOrder.
+   * Implements the "Strict -> Backorder (Proxy)" fallback logic.
+   * * @param {Array<{productId: string, sizeLabel: string, qty: number}>} items
    * @param {mongoose.ClientSession} session - required
    * @returns {Promise<void>}
    * @throws {InvalidParamsError|InsufficientStockError}
@@ -222,45 +190,45 @@ export default class InventoryService {
       this._validateParams(it.productId, it.sizeLabel, it.qty);
     }
 
-    // Attempt each update; on failure fetch available and throw InsufficientStockError
+    // Process each item
     for (const it of items) {
-      const updated = await Product.updateOne(
-        {
-          _id: it.productId,
-          "sizes.size": it.sizeLabel,
-          "sizes.stock": { $gte: it.qty }
-        },
-        { $inc: { "sizes.$.stock": -it.qty } },
-        { session, runValidators: true }
-      );
+      const update = { $inc: { "sizes.$.stock": -it.qty } };
+      
+      // 1. Strict Check: Ensure stock >= qty
+      const strictFilter = {
+        _id: it.productId,
+        "sizes.size": it.sizeLabel,
+        "sizes.stock": { $gte: it.qty }
+      };
+      
+      const strictRes = await Product.updateOne(strictFilter, update, { session });
+      const modified = (strictRes.modifiedCount ?? strictRes.nModified ?? 0) > 0;
 
-      const modified = (updated.modifiedCount ?? updated.nModified ?? 0) > 0;
       if (!modified) {
-        const current = await Product.findOne(
-          { _id: it.productId, "sizes.size": it.sizeLabel },
-          { "sizes.$": 1 }
-        ).session(session).lean();
+         // 2. Check for Proxy/Backorder capability
+         // We fetch the product to see if it has a wholesaleSourceId
+         const product = await Product.findById(it.productId).session(session).select("wholesaleSourceId name").lean();
+         
+         if (product && product.wholesaleSourceId) {
+             // It IS a proxy item. Allow negative stock.
+             const forceFilter = { 
+                 _id: it.productId, 
+                 "sizes.size": it.sizeLabel 
+             };
 
-        const available = current && current.sizes && current.sizes[0] ? Number(current.sizes[0].stock || 0) : 0;
-        throw new InsufficientStockError(
-          `Insufficient stock for product ${it.productId} size ${it.sizeLabel}. Requested ${it.qty}, available ${available}`
-        );
-      }
-
-      // post-check
-      const post = await Product.findOne(
-        { _id: it.productId, "sizes.size": it.sizeLabel },
-        { "sizes.$": 1 }
-      ).session(session).lean();
-
-      const newStock = post && post.sizes && post.sizes[0] ? Number(post.sizes[0].stock || 0) : 0;
-      if (newStock < 0) {
-        throw new InsufficientStockError(
-          `Post-update stock negative (${newStock}) for product ${it.productId} size ${it.sizeLabel}`
-        );
+             const forceRes = await Product.updateOne(forceFilter, update, { session });
+             
+             // If force update failed, it means the size label doesn't exist or product missing
+             if ((forceRes.modifiedCount ?? forceRes.nModified ?? 0) === 0) {
+                 throw new InsufficientStockError(`Size '${it.sizeLabel}' not found for product ${product.name || it.productId}`);
+             }
+         } else {
+             // 3. Hard Fail: Not a proxy item, and stock was insufficient
+             throw new InsufficientStockError(`Insufficient stock for ${product?.name || it.productId}`);
+         }
       }
     }
-    // all decrements succeeded (still inside caller's transaction)
+    // All items processed successfully (either via strict decrement or proxy backorder)
   }
 }
 

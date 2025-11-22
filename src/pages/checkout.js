@@ -1,10 +1,9 @@
-// src/pages/checkout.js
 import React, { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import { useRouter } from "next/router";
 import Link from "next/link";
-import CheckoutNavbar from "@/components/CheckoutNavbar"; // NEW
-import CheckoutAddressForm from "@/components/CheckoutAddressForm"; // NEW
-import CheckoutOrderSummary from "@/components/CheckoutOrderSummary"; // NEW
+import CheckoutNavbar from "@/components/CheckoutNavbar";
+import CheckoutAddressForm from "@/components/CheckoutAddressForm";
+import CheckoutOrderSummary from "@/components/CheckoutOrderSummary";
 import CustomerAddressModal from "@/components/CustomerAddressModal";
 import ManualLocationModal from "@/components/ManualLocationModal";
 import { Button } from "@/components/ui/button";
@@ -13,13 +12,20 @@ import {
   CardContent, 
   CardHeader, 
   CardTitle, 
-  CardFooter,
-  CardDescription
+  CardFooter, 
+  CardDescription 
 } from "@/components/ui/card";
-import { Separator } from "@/components/ui/separator";
-import { Loader2, ArrowRight, MapPin, Wallet, Edit, RefreshCw, Check, AlertTriangle } from "lucide-react";
+import { 
+  Loader2, 
+  Wallet, 
+  Check, 
+  AlertTriangle, 
+  MapPin, 
+  Edit, 
+  RefreshCw, 
+  ArrowRight 
+} from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-// Import Dialog components needed for the custom back button warning
 import { 
   Dialog, 
   DialogContent, 
@@ -28,36 +34,28 @@ import {
   DialogDescription, 
   DialogFooter 
 } from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input"; // Keep Input for the payment card placeholder
-
 
 // --- HELPERS ---
 const formatPrice = (p) => `₹${Number(p || 0).toLocaleString('en-IN')}`;
-const formatDate = (dateString) => {
-  if (!dateString) return 'N/A';
-  return new Date(dateString).toLocaleDateString('en-IN', { month: 'short', day: 'numeric', year: 'numeric' });
-};
 
 function loadCart() {
   try { return JSON.parse(localStorage.getItem("livemart_cart") || "[]"); } catch (e) { return []; }
 }
-function saveCart(cart) { localStorage.setItem("livemart_cart", JSON.stringify(cart)); }
 
+// --- FIX 1: Updated Stock Helper for Proxy ---
 function getStockForSize(product, sizeLabel) {
   if (!product || !Array.isArray(product.sizes)) return 0;
   const sizeObj = product.sizes.find(s => String(s.size) === String(sizeLabel));
-  return Number(sizeObj?.stock || 0);
+  // Check 'totalAvailable' (Local + Proxy) first, fallback to 'stock'
+  return Number(sizeObj?.totalAvailable ?? sizeObj?.stock ?? 0);
 }
 
-// --- INITIAL ADDRESS DATA STRUCTURE ---
 const emptyAddress = {
     email: '', phone: '', countryCode: '+91', firstName: '', lastName: '', 
     addressLine1: '', addressLine2: '', city: '', state: '', pincode: '', country: 'India',
-    location: null // { lat, lng }
+    location: null 
 };
 
-
-// --- MAIN COMPONENT ---
 export default function CheckoutPage() {
   const router = useRouter();
   const [user, setUser] = useState(null);
@@ -65,29 +63,24 @@ export default function CheckoutPage() {
   const [productDetails, setProductDetails] = useState({});
   const [loading, setLoading] = useState(true);
   const [cartError, setCartError] = useState(null);
-  const [submissionError, setSubmissionError] = useState(null); // Consolidated non-cart error
+  const [submissionError, setSubmissionError] = useState(null); 
   const [deliveryData, setDeliveryData] = useState(null);
   const [customerLocation, setCustomerLocation] = useState(null);
   
-  // Checkout Steps/Toggles
-  const [activeTab, setActiveTab] = useState('shipping'); // 'shipping' or 'payment'
+  const [activeTab, setActiveTab] = useState('shipping'); 
   const [isShippingComplete, setIsShippingComplete] = useState(false);
   
-  // Address & Contact Info State
   const [checkoutInfo, setCheckoutInfo] = useState(emptyAddress);
   const [selectedAddressId, setSelectedAddressId] = useState(null);
 
-  // Modals
   const [isAddressModalOpen, setIsAddressModalOpen] = useState(false);
   const [showManualModal, setShowManualModal] = useState(false);
 
-  // --- BROWSER BACK STATE ---
   const [showBrowserBackWarning, setShowBrowserBackWarning] = useState(false);
   const [targetUrl, setTargetUrl] = useState(null);
   const ignoreNextPopState = useRef(false);
-  // -----------------------------
   
-  // --- Derived Calculations (useMemo) ---
+  // --- Derived Calculations ---
   const itemsWithDetails = useMemo(() => {
     return loadCart().map(item => {
       const product = productDetails[item.productId];
@@ -101,6 +94,7 @@ export default function CheckoutPage() {
       const subtotalAfterDiscount = discountedPrice * item.qty;
       const totalDiscount = subtotalBeforeDiscount - subtotalAfterDiscount;
       
+      // Uses updated helper to check Proxy stock
       const stock = product ? getStockForSize(product, item.size) : 0;
       
       const delivery = deliveryData?.detailedItems.find(d => 
@@ -115,7 +109,7 @@ export default function CheckoutPage() {
         subtotalBeforeDiscount,
         subtotalAfterDiscount,
         totalDiscount,
-        isAvailable: stock >= item.qty,
+        isAvailable: stock >= item.qty, // Checks Proxy stock correctly now
         deliveryFee: delivery?.deliveryFee || 0,
         name: product?.name || item.name || "Item",
         image: product?.images?.[0] || item.image || "/images/placeholder.png",
@@ -123,7 +117,6 @@ export default function CheckoutPage() {
     });
   }, [productDetails, deliveryData]);
   
-  // Aggregation using the fixed properties
   const totalDiscountAmount = itemsWithDetails.reduce((s, item) => s + item.totalDiscount, 0);
   const totalSubtotalBeforeDiscount = itemsWithDetails.reduce((s, item) => s + item.subtotalBeforeDiscount, 0);
   const totalFee = typeof deliveryData?.totalDeliveryFee === 'number' ? deliveryData.totalDeliveryFee : 0;
@@ -134,24 +127,26 @@ export default function CheckoutPage() {
                                  !cartError && 
                                  itemsWithDetails.every(item => item.isAvailable);
 
-
-  // --- CORE LOCATION & DATA FETCHING ---
-
+  // --- FIX 2: Fetch Individual Details for Proxy Data ---
   const fetchProductDetails = useCallback(async (cartItems) => {
     if (cartItems.length === 0) return;
     try {
-      const allRes = await fetch(`/api/products?limit=50`); 
-      const allData = await allRes.json();
-      const allProducts = allData.items || [];
+      const uniqueIds = [...new Set(cartItems.map(i => i.productId))];
+      
+      // Fetch individually to trigger the [id].js logic (which calculates proxy stock)
+      const promises = uniqueIds.map(id => 
+          fetch(`/api/products/${id}`).then(r => r.ok ? r.json() : null)
+      );
+      
+      const results = await Promise.all(promises);
       
       const detailsMap = {};
-      const productIds = cartItems.map(i => i.productId);
+      results.forEach(data => {
+          if (data && data.product) {
+              detailsMap[String(data.product._id)] = data.product;
+          }
+      });
       
-      for (const p of allProducts) {
-        if (productIds.includes(String(p._id))) {
-            detailsMap[String(p._id)] = p;
-        }
-      }
       setProductDetails(detailsMap);
     } catch (err) {
       console.error("Failed to fetch product details:", err);
@@ -182,20 +177,14 @@ export default function CheckoutPage() {
       setDeliveryData(data);
     } catch (err) {
       console.error("Delivery fee error:", err);
-      setCartError("Failed to calculate delivery fee.");
-      setDeliveryData(null);
+      console.warn("Fee calculation failed");
     }
   }, []);
 
-  /**
-   * Helper: Updates LocalStorage with *full* address object and triggers a reload.
-   */
   const setActiveLocationAndReload = useCallback((addressObj) => {
     if (!addressObj || !addressObj.location?.coordinates) return;
 
     const [lng, lat] = addressObj.location.coordinates;
-    
-    // 1. Save LOCATION data (minimal lat/lng for delivery calculation)
     const locData = {
       city: addressObj.city,
       pincode: addressObj.pincode,
@@ -203,36 +192,27 @@ export default function CheckoutPage() {
       lat, lng
     };
     localStorage.setItem("livemart_active_location", JSON.stringify(locData));
-    
-    // 2. Save FULL ADDRESS object (for pre-filling form fields upon reload)
     localStorage.setItem("livemart_active_address_full", JSON.stringify(addressObj));
 
-
-    // Dispatch event to re-fetch fees and update navbar
     if (typeof window !== "undefined") {
       window.dispatchEvent(new Event("livemart-location-update"));
-      // Force reload is generally safer to reset entire checkout flow
       window.location.reload(); 
     }
   }, []);
 
-
-  // --- INITIALIZATION EFFECT ---
   useEffect(() => {
     const initialCart = loadCart();
     if (initialCart.length === 0) {
-        router.replace('/cart'); // Redirect if cart is empty
+        router.replace('/cart');
         return;
     }
     setCart(initialCart);
     
-    // FIX: Intercept Browser Back Button and use custom Dialog
     router.beforePopState(({ url, as, options }) => {
         if (ignoreNextPopState.current) {
-            ignoreNextPopState.current = false; // Reset the flag
-            return true; // Allow navigation to proceed
+            ignoreNextPopState.current = false;
+            return true;
         }
-
         if (router.pathname === '/checkout') {
             setTargetUrl(as);
             setShowBrowserBackWarning(true);
@@ -241,7 +221,6 @@ export default function CheckoutPage() {
         return true;
     });
 
-    // Function to run initialization logic
     async function init() {
       setLoading(true);
       
@@ -249,7 +228,6 @@ export default function CheckoutPage() {
       let initialAddress = null;
       let fullAddressObj = null;
       
-      // 1. Fetch User Profile
       try {
         const token = localStorage.getItem("token");
         const res = await fetch("/api/user/profile", { 
@@ -262,7 +240,6 @@ export default function CheckoutPage() {
         }
       } catch (e) { console.error("Failed to fetch user profile", e); }
       
-      // 2. Determine Active Location (Source of truth)
       const savedLoc = localStorage.getItem("livemart_active_location");
       const savedFullAddress = localStorage.getItem("livemart_active_address_full"); 
 
@@ -276,7 +253,6 @@ export default function CheckoutPage() {
       } else if (savedLoc) {
           initialAddress = JSON.parse(savedLoc);
       } else if (initialUser?.addresses?.length > 0) {
-          // Fallback to first address if logged in
           const def = initialUser.addresses[0];
           fullAddressObj = def;
           initialAddress = {
@@ -286,7 +262,6 @@ export default function CheckoutPage() {
           };
       }
       
-      // 3. Populate Checkout Info
       let info = { ...emptyAddress, email: initialUser?.email || '' };
       
       if (initialUser) {
@@ -295,9 +270,7 @@ export default function CheckoutPage() {
           info.phone = initialUser.phone || '';
       }
       
-      // Use full address object if available to fill all fields
       if (fullAddressObj) {
-          // Overwrite all fields from the full address object
           info = {
               ...info,
               ...fullAddressObj,
@@ -307,46 +280,37 @@ export default function CheckoutPage() {
           };
           setSelectedAddressId(fullAddressObj._id || 'manual');
       } else if (initialAddress) {
-           // Fallback to just location data if only partial info is available
            info = { ...info, ...initialAddress, location: initialAddress };
            setSelectedAddressId('manual');
       }
       
-      // Ensure basic user info (email) is present
       if (initialUser?.email && !info.email) info.email = initialUser.email;
       
       setCheckoutInfo(info);
       setCustomerLocation(initialAddress);
       
-      // 4. Fetch Details
       await fetchProductDetails(initialCart);
       
       setLoading(false);
     }
     
-    // Listen for location changes from Navbar or other components
     const handleLocationUpdate = () => init();
     window.addEventListener("livemart-location-update", handleLocationUpdate);
     
     init();
     
-    // Cleanup function: restore default behavior on component unmount
     return () => {
          window.removeEventListener("livemart-location-update", handleLocationUpdate);
-         router.beforePopState(() => true); // Restore default behavior
+         router.beforePopState(() => true);
     };
   }, [router, fetchProductDetails]);
   
-  // 5. Fetch Delivery Fee Effect
   useEffect(() => {
     if (Object.keys(productDetails).length > 0 && customerLocation && cart.length > 0) {
         fetchDeliveryFee(cart, customerLocation);
     }
   }, [cart, productDetails, customerLocation, fetchDeliveryFee]);
 
-
-  // --- HANDLERS ---
-  
   const handleAddressSelect = (address) => {
     setIsAddressModalOpen(false);
     setActiveLocationAndReload(address); 
@@ -397,8 +361,6 @@ export default function CheckoutPage() {
     setLoading(true);
     setSubmissionError(null);
     
-    // --- PROCEED TO ORDER CREATION (NO MOCK PAYMENT SIMULATION) ---
-
     const customerPayload = {
         name: `${checkoutInfo.firstName} ${checkoutInfo.lastName || ''}`.trim(),
         email: checkoutInfo.email,
@@ -418,7 +380,6 @@ export default function CheckoutPage() {
     }));
     
     try {
-      // Mock API call (for payment success structure)
       const payRes = await fetch("/api/payments/mock/charge", {
         method:"POST", headers:{"Content-Type":"application/json"},
         body: JSON.stringify({ amount: grandTotal })
@@ -427,7 +388,6 @@ export default function CheckoutPage() {
         throw new Error("Payment failed during API simulation.");
       }
       
-      // Create Order
       const res = await fetch("/api/orders", {
         method:"POST", 
         headers:{"Content-Type":"application/json"},
@@ -440,7 +400,6 @@ export default function CheckoutPage() {
       }
       const order = await res.json();
 
-      // 3. Clear cart and redirect
       localStorage.removeItem("lm_cart");
       localStorage.removeItem("livemart_cart");
       localStorage.removeItem("livemart_active_address_full"); 
@@ -468,7 +427,6 @@ export default function CheckoutPage() {
     }
   };
 
-  // --- BROWSER NAVIGATION HANDLERS ---
   const handleConfirmBrowserBack = () => {
       setShowBrowserBackWarning(false);
       ignoreNextPopState.current = true; 
@@ -478,11 +436,10 @@ export default function CheckoutPage() {
            router.back();
       }
   };
-  // -------------------------------------------------
 
 
   if (loading || cart.length === 0) {
-    if (!loading && cart.length === 0) return null; // Should redirect in effect
+    if (!loading && cart.length === 0) return null; 
     return (
       <div className="flex justify-center items-center h-screen">
         <Loader2 className="h-8 w-8 animate-spin text-gray-400" />
@@ -497,10 +454,9 @@ export default function CheckoutPage() {
       <main className="max-w-[1440px] mx-auto px-6 py-10">
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
           
-          {/* Left Column: Toggable Forms (col-span-2) */}
+          {/* Left Column: Toggable Forms */}
           <div className="lg:col-span-2 space-y-6">
             
-            {/* Toggle Buttons */}
             <div className="flex gap-4 border-b border-gray-200 text-lg font-semibold mb-6">
                 <button
                     onClick={() => setActiveTab('shipping')}
@@ -517,7 +473,6 @@ export default function CheckoutPage() {
                 </button>
             </div>
 
-            {/* Error Display */}
             {(cartError || submissionError) && (
               <Alert variant="destructive" className="mb-4">
                 <AlertTriangle className="h-4 w-4" />
@@ -526,7 +481,6 @@ export default function CheckoutPage() {
               </Alert>
             )}
 
-            {/* --- 3a. Shipping Information Card --- */}
             <Card className="shadow-lg">
                 <CardHeader>
                     <CardTitle className="text-2xl flex items-center justify-between">
@@ -535,7 +489,6 @@ export default function CheckoutPage() {
                     </CardTitle>
                 </CardHeader>
                 <CardContent className="p-0">
-                    {/* Form Component */}
                     {(activeTab === 'shipping' || !isShippingComplete) ? (
                         <CheckoutAddressForm 
                             initialData={checkoutInfo} 
@@ -560,7 +513,6 @@ export default function CheckoutPage() {
                 </CardContent>
             </Card>
 
-            {/* --- 3b. Payment Card --- */}
             <Card className="shadow-lg">
                 <CardHeader>
                     <CardTitle className="text-2xl flex items-center gap-2">
@@ -578,7 +530,6 @@ export default function CheckoutPage() {
                                 </AlertDescription>
                             </Alert>
                             
-                            {/* Static Payment Option */}
                             <div className="border p-4 rounded-xl bg-gray-50 text-gray-700">
                                 <label className="flex items-center space-x-3">
                                     <input type="radio" name="paymentMethod" defaultChecked className="h-4 w-4" disabled={true}/>
@@ -586,7 +537,6 @@ export default function CheckoutPage() {
                                 </label>
                             </div>
                             
-                            {/* Final Place Order Button */}
                             <Button 
                                 onClick={handlePlaceOrder}
                                 disabled={loading}
@@ -603,12 +553,8 @@ export default function CheckoutPage() {
             </Card>
           </div>
           
-          {/* Right Column (col-span-1) */}
           <div className="lg:col-span-1">
-            {/* Wrapper for Sticky positioning */}
             <div className="lg:sticky lg:top-20 space-y-6 max-h-[calc(100vh - 100px)] overflow-y-auto">
-              
-              {/* 4a. Change Address Card */}
               <Card className="shadow-lg">
                   <CardHeader>
                       <CardTitle className="text-xl">Delivery Location</CardTitle>
@@ -632,7 +578,6 @@ export default function CheckoutPage() {
                   </CardContent>
               </Card>
 
-              {/* 4b. Your Order Display */}
               <CheckoutOrderSummary orderData={{ 
                   itemsWithDetails, 
                   totalSubtotalBeforeDiscount, 
@@ -645,25 +590,22 @@ export default function CheckoutPage() {
         </div>
       </main>
 
-      {/* --- Address Selection Modal (for logged-in users) --- */}
       {user && (
         <CustomerAddressModal 
           isOpen={isAddressModalOpen} 
           onClose={() => setIsAddressModalOpen(false)}
           addresses={user.addresses || []}
-          onSelect={handleAddressSelect} // Calls setActiveLocationAndReload
-          onAddressAdded={handleAddressAdded} // Calls setActiveLocationAndReload
+          onSelect={handleAddressSelect} 
+          onAddressAdded={handleAddressAdded} 
         />
       )}
       
-      {/* --- Manual Location Modal (for guest users) --- */}
       <ManualLocationModal 
         isOpen={showManualModal} 
         onClose={() => setShowManualModal(false)}
-        onLocationSet={handleManualLocationSet} // Calls setActiveLocationAndReload
+        onLocationSet={handleManualLocationSet} 
       />
       
-      {/* --- Browser Back Confirmation Dialog --- */}
       <Dialog open={showBrowserBackWarning} onOpenChange={setShowBrowserBackWarning}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>

@@ -1,10 +1,10 @@
-// src/services/orderService.js
 import mongoose from "mongoose";
 import Order from "../models/orderModel.js";
 import Product from "../models/Product.js";
 import User from "../models/User.js"; 
-import Delivery from "../models/deliveryModel.js"; // <--- IMPORT ADDED
+import Delivery from "../models/deliveryModel.js"; 
 import InventoryService, { InsufficientStockError as InvInsufficientStockError } from "./inventory.js";
+import { sendEmail } from "../lib/mailer.js"; // <--- NEW IMPORT
 
 /** Base order error */
 class OrderError extends Error {}
@@ -23,6 +23,8 @@ export default class OrderService {
     }
 
     const session = await mongoose.startSession();
+    let savedOrder = null;
+
     try {
       session.startTransaction();
 
@@ -118,12 +120,11 @@ export default class OrderService {
         estimatedDelivery
       });
 
-      const saved = await orderDoc.save({ session });
+      savedOrder = await orderDoc.save({ session });
 
       await session.commitTransaction();
       session.endSession();
 
-      return saved;
     } catch (err) {
       try {
         await session.abortTransaction();
@@ -135,6 +136,73 @@ export default class OrderService {
       }
       throw err;
     }
+
+    // --- NEW LOGIC: Check for Proxy Orders (Negative Stock) & Notify Retailer ---
+    // We run this AFTER the transaction commits so we don't block the user or fail the order if email fails.
+    try {
+      const backorderedItems = [];
+      
+      // Re-check the stock of items we just sold
+      for (const item of items) {
+         const freshProd = await Product.findById(item.productId);
+         if (freshProd) {
+            const sizeObj = freshProd.sizes.find(s => s.size === item.sizeLabel);
+            // If stock is negative, it means we sold via Proxy Availability
+            if (sizeObj && sizeObj.stock < 0) {
+               backorderedItems.push({
+                 name: freshProd.name,
+                 size: item.sizeLabel,
+                 soldQty: item.qty,
+                 currentStock: sizeObj.stock
+               });
+            }
+         }
+      }
+
+      if (backorderedItems.length > 0 && sellerId) {
+          const retailer = await User.findById(sellerId);
+          
+          if (retailer && retailer.email) {
+              console.log(`[Proxy Alert] Sending email to retailer: ${retailer.email}`);
+              
+              const itemsHtml = backorderedItems.map(i => 
+                `<li style="margin-bottom: 8px;">
+                   <strong>${i.name}</strong> (Size: ${i.size})<br/>
+                   Sold: ${i.soldQty} | Current Stock: <span style="color:red">${i.currentStock}</span>
+                 </li>`
+              ).join("");
+
+              await sendEmail({
+                  to: retailer.email,
+                  subject: `⚠️ Action Required: Proxy Order Received #${savedOrder._id.toString().slice(-6)}`,
+                  text: `You have received an order for items that are currently out of stock. Please purchase stock from the Wholesaler immediately.`,
+                  html: `
+                    <div style="font-family: Arial, sans-serif; padding: 20px; border: 1px solid #eee; border-radius: 8px; max-width: 600px;">
+                      <h2 style="color: #d32f2f;">Proxy Order Alert</h2>
+                      <p>Hello <strong>${retailer.name}</strong>,</p>
+                      <p>You have received a new customer order <strong>#${savedOrder._id}</strong> containing items that are out of stock in your local inventory.</p>
+                      
+                      <div style="background-color: #fff3cd; color: #856404; padding: 15px; border-radius: 5px; margin: 20px 0;">
+                        <strong>Action Required:</strong> Please log in to your dashboard and purchase stock from the Wholesaler immediately to fulfill this order.
+                      </div>
+
+                      <h3>Items Requiring Restock:</h3>
+                      <ul>${itemsHtml}</ul>
+                      
+                      <p style="margin-top: 20px; font-size: 12px; color: #666;">
+                        This is an automated notification from LiveMart.
+                      </p>
+                    </div>
+                  `
+              });
+          }
+      }
+    } catch (notifyErr) {
+       console.error("Failed to send proxy notification email (Order valid, email failed):", notifyErr);
+    }
+    // -------------------------------------------------------------------------
+
+    return savedOrder;
   }
 
   /**
@@ -170,11 +238,21 @@ export default class OrderService {
         const wholesaleProduct = await Product.findById(item.productId).session(session);
         if (!wholesaleProduct) continue; 
 
+        // --- FIX: Clean source object ---
+        const sourceObj = wholesaleProduct.toObject();
+        delete sourceObj._id;
+        delete sourceObj.id;
+        delete sourceObj.ownerId;
+        delete sourceObj.wholesaleSourceId; 
+        delete sourceObj.createdAt;
+        delete sourceObj.updatedAt;
+        delete sourceObj.__v;
+
         const newProductData = {
-          ...wholesaleProduct.toObject(),
+          ...sourceObj,
           _id: new mongoose.Types.ObjectId(),
           ownerId: buyer._id,
-          wholesaleSourceId: wholesaleProduct._id,
+          wholesaleSourceId: wholesaleProduct._id, 
           isPublished: false,
           sizes: [{ 
             size: item.sizeLabel, 
@@ -220,7 +298,6 @@ export default class OrderService {
     }
   }
 
-  // --- THIS IS THE FIXED METHOD (Auto-Creates Delivery with Valid Enums) ---
   static async updateStatus(id, newStatus, { restoreStock = false } = {}) {
     if (!id) throw new InvalidOrderParamsError("Order id is required");
     if (!newStatus || typeof newStatus !== "string") throw new InvalidOrderParamsError("newStatus is required");
@@ -265,26 +342,18 @@ export default class OrderService {
         order.fulfillment = order.fulfillment || {};
         order.fulfillment.shippedAt = now;
         
-        // --- LOGIC FIX STARTS HERE ---
-        // Detect if this is a B2B order (Wholesaler -> Retailer) or B2C (Retailer -> Customer)
-        // B2B orders usually have a 'userId' field linking to the Retailer account.
         const isB2B = !!order.userId; 
-
         const fromType = isB2B ? "WHOLESALER" : "RETAILER";
         const toType = isB2B ? "RETAILER" : "CUSTOMER";
         
-        // For B2B, the "Customer Name" in dropoff should be the Retailer's name
-        // The existing order.customer object should already contain the correct destination info
-        // -----------------------------
-
         const existingDelivery = await Delivery.findOne({ orderRef: order._id }).session(session);
         
         if (!existingDelivery) {
             await Delivery.create([{
                 orderRef: order._id,
                 externalOrderId: order._id.toString(),
-                fromType: fromType, // <--- Uses dynamic type
-                toType: toType,     // <--- Uses dynamic type
+                fromType: fromType, 
+                toType: toType,     
                 pickup: { 
                     address: "Seller Warehouse", 
                     name: "Seller Store"

@@ -8,7 +8,7 @@ import StarRating from "@/components/StarRating";
 import ProductCard from "@/components/ProductCard";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Loader2, MapPinOff, Info, RefreshCw, MapPin } from "lucide-react";
+import { Loader2, MapPinOff, Info, RefreshCw, MapPin, Truck } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -30,8 +30,10 @@ function slugify(s = "") {
 }
 function totalStockFrom(product = {}) {
   if (!product) return 0;
-  if (typeof product.totalStock === "number") return product.totalStock;
-  if (Array.isArray(product.sizes)) return product.sizes.reduce((acc, it) => acc + (Number(it.stock || 0)), 0);
+  // Use totalAvailable if calculated by API (Proxy logic), otherwise fallback to standard stock
+  if (Array.isArray(product.sizes)) {
+      return product.sizes.reduce((acc, it) => acc + (Number(it.totalAvailable ?? it.stock ?? 0)), 0);
+  }
   return 0;
 }
 function isClothingProduct(product = {}) {
@@ -110,6 +112,7 @@ export default function ProductDetailPage() {
   // size & quantity
   const [selectedSize, setSelectedSize] = useState(null);
   const [selectedSizeStock, setSelectedSizeStock] = useState(0);
+  const [selectedProxyStock, setSelectedProxyStock] = useState(0); // New State for Proxy
   const [qty, setQty] = useState(1);
   const prevQtyRef = useRef(1);
 
@@ -203,21 +206,26 @@ export default function ProductDetailPage() {
   
   // --- CORE FIX: Combined function to handle guest/logged-in location persistence ---
   const fetchAndSaveLocation = useCallback((product, forcedBrowserLocation = false) => {
-    const productId = product._id;
-    
+    // Helper to process valid location data
     const estimate = (locData) => {
         setCustomerLocation(locData);
-        fetchDeliveryEstimate(productId, locData);
+        // Note: We do NOT call fetchDeliveryEstimate here anymore. 
+        // The useEffect below watching `customerLocation` will trigger it.
+        // This prevents double-fetching.
+        
         setLocationError(false);
-        if (typeof window !== 'undefined') {
-            window.dispatchEvent(new Event("livemart-location-update"));
-        }
+        
+        // --- CRITICAL FIX: REMOVED THE EVENT DISPATCH ---
+        // This function consumes the location; it shouldn't announce it, 
+        // otherwise the listener calls this function again -> Infinite Loop.
     };
 
     const savedLoc = localStorage.getItem("livemart_active_location");
     if (savedLoc && !forcedBrowserLocation) {
         // 1. Use saved location (from Navbar selection or previous successful geolocation)
-        estimate(JSON.parse(savedLoc));
+        try {
+            estimate(JSON.parse(savedLoc));
+        } catch(e) { /* ignore corrupt json */ }
         return;
     } 
     
@@ -244,7 +252,7 @@ export default function ProductDetailPage() {
             setLocationError(true); // Set error state to show help button
         }
     );
-  }, [fetchDeliveryEstimate]);
+  }, []); // Removed fetchDeliveryEstimate form dependency as we don't call it directly
 
 
   // --- Effect to load product & handle location listeners ---
@@ -278,14 +286,14 @@ export default function ProductDetailPage() {
         const initialSize = sizes && sizes.length ? sizes[0] : null;
         const initialSizeLabel = initialSize ? sizeLabelOf(initialSize) : null;
 
-        // --- NEW/FIXED LOGIC START (Initialize QTY to Cart QTY) ---
+        // Default stock is now totalAvailable (local + proxy)
+        let defaultStock = initialSize ? Number(initialSize.totalAvailable ?? initialSize.stock ?? 0) : totalStockFrom(p);
+        let defaultProxy = initialSize ? Number(initialSize.proxyStock || 0) : 0;
         let defaultQty = 1;
-        let defaultStock = initialSize ? Number(initialSize.stock || 0) : totalStockFrom(p);
 
         if (initialSizeLabel) {
             const currentCartItem = getCartItem(p._id, initialSizeLabel);
             if (currentCartItem) {
-                // If item is in cart, initialize QTY input to the quantity already in cart
                 defaultQty = currentCartItem.qty; 
             }
         }
@@ -293,22 +301,23 @@ export default function ProductDetailPage() {
         // Final state setup
         if (initialSize) {
           setSelectedSize(initialSizeLabel);
-          setSelectedSizeStock(defaultStock); 
+          setSelectedSizeStock(defaultStock);
+          setSelectedProxyStock(defaultProxy); 
         } else {
           setSelectedSize(null);
           setSelectedSizeStock(defaultStock);
+          setSelectedProxyStock(0);
         }
         
-        setQty(defaultQty); // Initialize QTY to what's in the cart or 1
+        setQty(defaultQty); 
         prevQtyRef.current = defaultQty;
-        // --- NEW/FIXED LOGIC END ---
         
         setSizeImage(sizeChartImageFor(p));
         
-        // --- Init Location: Use combined logic ---
+        // --- Init Location ---
         const handleLocationUpdate = () => fetchAndSaveLocation(p);
         
-        fetchAndSaveLocation(p); // Initial call for guest/logged-in check
+        fetchAndSaveLocation(p); // Initial call
         window.addEventListener("livemart-location-update", handleLocationUpdate);
         
         return () => { 
@@ -327,7 +336,7 @@ export default function ProductDetailPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id, fetchOwnerData, fetchSimilarProducts, fetchAndSaveLocation]);
   
-  // Re-estimate when location changes (unchanged)
+  // Re-estimate when location changes (Logic separated from fetchAndSaveLocation to avoid recursion)
   useEffect(() => {
       if (product && customerLocation) {
           fetchDeliveryEstimate(product._id, customerLocation);
@@ -345,13 +354,15 @@ export default function ProductDetailPage() {
   // --- FIXED QTY HANDLERS ---
   const handleSizeChange = (newSizeLabel) => {
     setSelectedSize(newSizeLabel);
-    
-    // 1. Update max stock for the newly selected size
     const newSize = product.sizes.find(s => sizeLabelOf(s) === newSizeLabel);
-    const newStock = newSize ? Number(newSize.stock || 0) : 0;
-    setSelectedSizeStock(newStock);
+    
+    // Update both total and proxy stock
+    const newTotal = newSize ? Number(newSize.totalAvailable ?? newSize.stock ?? 0) : 0;
+    const newProxy = newSize ? Number(newSize.proxyStock || 0) : 0;
+    
+    setSelectedSizeStock(newTotal);
+    setSelectedProxyStock(newProxy);
 
-    // 2. Update QTY input to reflect what's currently in the cart for this size
     const currentCartItem = getCartItem(product._id, newSizeLabel);
     const cartQty = currentCartItem ? currentCartItem.qty : 1;
     setQty(cartQty);
@@ -455,8 +466,11 @@ export default function ProductDetailPage() {
   
   const getDeliveryDate = () => {
     if (!deliveryEstimate || !deliveryEstimate.estimatedDays) return "N/A";
+    // Add buffer days for proxy items
+    const extraDays = selectedProxyStock > 0 ? 3 : 0;
+    const totalDays = deliveryEstimate.estimatedDays + extraDays;
     const date = new Date();
-    date.setDate(date.getDate() + deliveryEstimate.estimatedDays);
+    date.setDate(date.getDate() + totalDays);
     return date.toLocaleDateString('en-IN', { weekday: 'short', month: 'short', day: 'numeric' });
   };
   
@@ -612,7 +626,7 @@ export default function ProductDetailPage() {
                   {product.sizes.map(s => {
                     const label = sizeLabelOf(s);
                     const isSelected = label === selectedSize;
-                    const stock = Number(s.stock || 0);
+                    const stock = Number(s.totalAvailable ?? s.stock ?? 0);
                     return (
                       <Button
                         key={label}
@@ -626,9 +640,24 @@ export default function ProductDetailPage() {
                     );
                   })}
                 </div>
-                <p className="text-sm text-muted-foreground">
-                    Stock: {selectedSize ? selectedSizeStock : totalStockFrom(product)} units
-                </p>
+
+                {/* --- STOCK STATUS MESSAGE --- */}
+                <div className="text-sm mt-2">
+                   {isOutOfStock ? (
+                      <span className="text-red-600 font-bold">Out of Stock</span>
+                   ) : selectedProxyStock > 0 && (selectedSizeStock - selectedProxyStock <= 0) ? (
+                      <div className="flex items-start gap-2 p-3 bg-blue-50 text-blue-800 rounded-lg border border-blue-100">
+                          <Truck className="w-5 h-5 shrink-0 mt-0.5" />
+                          <div>
+                              <p className="font-bold">Available via Partner Stock</p>
+                              <p className="text-xs mt-1">This item is shipping from our wholesale partner. Please allow <strong>3-5 extra days</strong> for delivery.</p>
+                          </div>
+                      </div>
+                   ) : (
+                      <span className="text-green-700 font-medium">In Stock ({selectedSizeStock} units)</span>
+                   )}
+                </div>
+
                 {/* Size Chart Button in the middle-right area */}
                 {showChartButton && (
                     <div className="flex justify-start pt-4">
