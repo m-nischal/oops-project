@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
 import { useRouter } from "next/router";
-import { Search, ShoppingCart, User, LogOut, Settings, UserCircle, MapPin, LogIn, UserPlus } from "lucide-react";
+import { Search, ShoppingCart, User, LogOut, Settings, UserCircle, MapPin, LogIn, UserPlus, AlertTriangle } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import {
@@ -20,7 +20,7 @@ import {
   DialogTitle,
   DialogDescription,
   DialogFooter,
-} from "@/components/ui/dialog"; // Import Dialog components
+} from "@/components/ui/dialog";
 import CustomerAddressModal from "@/components/CustomerAddressModal";
 import ManualLocationModal from "@/components/ManualLocationModal";
 
@@ -46,6 +46,9 @@ export default function CustomerNavbar() {
   const [nextUrl, setNextUrl] = useState('');
   const [exitMessage, setExitMessage] = useState('');
 
+  // --- NEW: Checkout Guardrail Modal State ---
+  const [showCheckoutGuardrail, setShowCheckoutGuardrail] = useState(false); 
+
   // Helper: Update Cart Count
   const updateCartCount = () => {
     const cart = loadCart();
@@ -57,7 +60,7 @@ export default function CustomerNavbar() {
   const setActiveLocation = (addressObj) => {
     if (!addressObj) return;
     
-    // Extract standard format
+    // 1. Save minimal location data
     const locData = {
       city: addressObj.city,
       pincode: addressObj.pincode,
@@ -65,30 +68,29 @@ export default function CustomerNavbar() {
       lat: addressObj.location?.coordinates?.[1],
       lng: addressObj.location?.coordinates?.[0]
     };
-
-    // Save to persistent storage
     localStorage.setItem("livemart_active_location", JSON.stringify(locData));
     
-    // Update State
+    // 2. Save full address object
+    localStorage.setItem("livemart_active_address_full", JSON.stringify(addressObj));
+    
+    // 3. Update State & Notify
     setSelectedAddress(addressObj);
 
-    // Notify other components (like LocalProducts)
     if (typeof window !== "undefined") {
       window.dispatchEvent(new Event("livemart-location-update"));
-      // --- MODIFIED: Force reload after setting saved location ---
       window.location.reload(); 
-      // ----------------------------------------------------
     }
   };
 
-  // --- NEW: Universal Navigation Handler with Exit Check ---
+  // --- FIXED: Universal Navigation Handler with Exit Check ---
   const handleNavigation = useCallback((e, url, message) => {
-    // If not on checkout page, proceed normally
+    // 1. If not on checkout page, navigate directly and exit.
     if (router.pathname !== '/checkout') {
+      router.push(url); // <-- FIX APPLIED HERE
       return; 
     }
     
-    // For local links, prevent default and trigger modal
+    // 2. If on checkout page, trigger the warning modal.
     if (e.type === 'click' && e.currentTarget.tagName.toLowerCase() === 'a') {
         e.preventDefault();
     }
@@ -96,7 +98,7 @@ export default function CustomerNavbar() {
     setNextUrl(url);
     setExitMessage(message);
     setShowExitWarning(true);
-  }, [router.pathname]);
+  }, [router.pathname, router]);
   
   // --- NEW: Confirmed Exit Action ---
   const confirmExit = () => {
@@ -122,16 +124,11 @@ export default function CustomerNavbar() {
           const data = await res.json();
           setUser(data.user);
           
-          const savedLoc = localStorage.getItem("livemart_active_location");
+          const savedFullAddress = localStorage.getItem("livemart_active_address_full");
           
-          if (savedLoc) {
-            const parsed = JSON.parse(savedLoc);
-            setSelectedAddress({
-              city: parsed.city,
-              pincode: parsed.pincode,
-              addressLine1: parsed.addressLine1,
-              location: { coordinates: [parsed.lng, parsed.lat] }
-            });
+          if (savedFullAddress) {
+            const parsed = JSON.parse(savedFullAddress);
+            setSelectedAddress(parsed);
           } else if (data.user?.addresses?.length > 0) {
             setSelectedAddress(data.user.addresses[0]);
           }
@@ -168,6 +165,7 @@ export default function CustomerNavbar() {
     try {
       await fetch("/api/auth/logout", { method: "POST" });
       localStorage.removeItem("token");
+      localStorage.removeItem("livemart_active_address_full");
       setUser(null);
       router.push("/login");
     } catch (e) {
@@ -193,13 +191,20 @@ export default function CustomerNavbar() {
     }
   };
 
+  // --- FIX: Guardrail for 'Deliver to' button when on checkout page ---
   const handleDeliverToClick = () => {
+    if (router.pathname === '/checkout') {
+        setShowCheckoutGuardrail(true); // Trigger the custom guardrail dialog
+        return;
+    }
+
     if (!user) {
       setShowManualModal(true);
     } else {
       setIsAddressModalOpen(true);
     }
   };
+  // ------------------------------------------------------------------
 
   const categories = ["Men", "Women", "Girls", "Boys"];
   const items = ["Shirts", "T-shirts", "Hoodies", "Sweatshirts", "Jeans", "Shorts", "Tracks"];
@@ -328,7 +333,7 @@ export default function CustomerNavbar() {
                     </DropdownMenuLabel>
                     <DropdownMenuSeparator className="bg-gray-100" />
                     <DropdownMenuItem asChild className="rounded-lg focus:bg-gray-50">
-                        {/* Profile/Settings trigger modal on checkout */}
+                        {/* Profile/Settings trigger modal on checkout, otherwise navigate immediately via corrected handleNavigation */}
                         <a onClick={(e) => handleNavigation(e, '/profile', "Leaving Checkout page. Your progress may be lost.")} className="cursor-pointer py-2.5 px-4 flex items-center"><User className="mr-3 h-4 w-4 text-gray-500" /> Profile</a>
                     </DropdownMenuItem>
                     <DropdownMenuItem asChild className="rounded-lg focus:bg-gray-50">
@@ -392,7 +397,27 @@ export default function CustomerNavbar() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-      {/* ------------------------------------------- */}
+      
+      {/* --- Checkout Guardrail Dialog --- */}
+      <Dialog open={showCheckoutGuardrail} onOpenChange={setShowCheckoutGuardrail}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center text-red-600">
+                <AlertTriangle className="h-5 w-5 mr-2" />
+                Action Blocked
+            </DialogTitle>
+            <DialogDescription>
+              To prevent data loss, delivery location changes must be managed using the 
+              **'Change Address / Location'** button located on the right side of the checkout page.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button onClick={() => setShowCheckoutGuardrail(false)} className="bg-black">
+              Got It
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </>
   );
 }

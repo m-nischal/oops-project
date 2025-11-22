@@ -494,7 +494,10 @@ export default function ProductDetailPage() {
   const decrementDisabled = qty <= 1;
   const isOutOfStock = totalStock <= 0;
   const chartImageUrl = sizeImage;
-  const showChartButton = Boolean(chartImageUrl) && isClothingProduct(product);
+  
+  // FIX: Show the button if an image is available OR if structured data exists
+  const chartAvailable = Boolean(chartImageUrl) || Boolean(product.sizeChart?.data);
+  const showChartButton = chartAvailable && isClothingProduct(product);
 
   const currentPrice = product.price || 0;
   const discountPercent = product.discount || 0;
