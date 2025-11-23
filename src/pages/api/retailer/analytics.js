@@ -1,7 +1,7 @@
 // src/pages/api/retailer/analytics.js
 import dbConnect from "../../../lib/dbConnect";
 import Order from "../../../models/orderModel";
-import { verifyToken } from "../../../lib/auth"; //
+import { verifyToken } from "../../../lib/auth"; 
 import mongoose from "mongoose";
 
 export default async function handler(req, res) {
@@ -12,39 +12,39 @@ export default async function handler(req, res) {
     return res.status(405).end(`Method ${req.method} Not Allowed`);
   }
 
-  // --- 1. Real Authentication ---
+  // --- 1. Authentication ---
   let payload;
   try {
-    payload = verifyToken(req); //
-
-    // --- THIS IS THE FIX ---
-    // We now check for the 'RETAILER' role
+    payload = verifyToken(req);
     if (!payload || payload.role !== "RETAILER") {
       return res
         .status(401)
-        .json({ error: "Unauthorized. You must be a Retailer." }); // Updated error message
+        .json({ error: "Unauthorized. You must be a Retailer." });
     }
-    // --- END FIX ---
-
   } catch (err) {
     return res.status(401).json({ error: "Unauthorized. Invalid token." });
   }
 
-  const sellerId = new mongoose.Types.ObjectId(payload.id); // Get the logged-in seller's ID
+  const sellerId = new mongoose.Types.ObjectId(payload.id);
 
-  // --- 2. Fetch Dashboard Analytics (Logic is identical) ---
+  // --- 2. Fetch Dashboard Analytics (FIXED CANCELLED COUNT) ---
   try {
-    const allOrders = await Order.find({ sellerId: sellerId }).lean(); //
+    const allOrders = await Order.find({ sellerId: sellerId }).lean(); 
 
     let totalSales = 0;
     let activeOrders = 0;
     let completedOrders = 0;
+    let cancelledOrders = 0; // ADDED: New counter for cancelled orders
 
     for (const order of allOrders) {
       if (order.status === "delivered") {
         completedOrders++;
         totalSales += order.total || 0;
-      } else if (order.status !== "cancelled" && order.status !== "refunded") {
+      } else if (order.status === "cancelled" || order.status === "refunded") {
+        // ADDED LOGIC: Explicitly count cancelled/refunded orders
+        cancelledOrders++;
+      } else {
+        // All other statuses (ordered, processing, shipped, etc.) are "Active"
         activeOrders++;
       }
     }
@@ -83,6 +83,7 @@ export default async function handler(req, res) {
         totalOrders: allOrders.length,
         activeOrders: activeOrders,
         completedOrders: completedOrders,
+        cancelledOrders: cancelledOrders, // ADDED: Include the new counter
       },
       saleGraph: formattedSalesGraph,
     });
