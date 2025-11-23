@@ -1,7 +1,45 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { useRouter } from "next/router";
 import Link from "next/link";
-import { User, Mail, Lock, ArrowRight, Loader2, CheckCircle2, Eye, EyeOff } from "lucide-react";
+import { User, Mail, Lock, ArrowRight, Loader2, CheckCircle2, Eye, EyeOff, Check, X } from "lucide-react";
+
+// --- Password Validation Logic (NEW) ---
+const isValidNewPassword = (password) => {
+    // 1. Minimum 8 characters
+    const hasLength = password.length >= 8;
+    // 2. At least one number
+    const hasNumber = /\d/.test(password);
+    // 3. At least one special character: @, !, or $
+    const hasSpecial = /[@!$]/.test(password);
+    return { hasLength, hasNumber, hasSpecial, isValid: hasLength && hasNumber && hasSpecial };
+};
+
+// --- Custom Password Input Component (NEW) ---
+const PasswordInput = ({ id, value, onChange, placeholder, showToggle, setShowToggle, isInvalid }) => (
+  <div className="relative">
+      <Lock className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 h-5 w-5" />
+      <input
+        id={id}
+        type={showToggle ? "text" : "password"}
+        value={value}
+        onChange={onChange}
+        placeholder={placeholder}
+        required
+        className={`w-full h-14 pl-12 pr-12 rounded-2xl bg-white border text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-black/10 focus:border-black transition-all 
+          ${isInvalid ? 'border-red-500 focus:border-red-500 focus:ring-red-200' : 'border-gray-200'}
+        `}
+      />
+      <button
+          type="button"
+          onClick={() => setShowToggle(prev => !prev)}
+          className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 p-1"
+          tabIndex="-1"
+      >
+          {showToggle ? <EyeOff size={20} /> : <Eye size={20} />}
+      </button>
+  </div>
+);
+
 
 export default function DeliveryRegisterPage() {
   const router = useRouter();
@@ -10,25 +48,46 @@ export default function DeliveryRegisterPage() {
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState(""); // Added
   const [otp, setOtp] = useState("");
   
   // UI State
   const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false); // Added
   const [otpSent, setOtpSent] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+
+  // Derived Validation State
+  const passwordValidation = useMemo(() => isValidNewPassword(password), [password]);
+  const passwordsMatch = password && confirmPassword && password === confirmPassword;
 
   // 1. Request OTP
   async function handleSendOtp(e) {
     e.preventDefault();
     setError("");
+    
+    if (!passwordValidation.isValid) {
+        setError("Please ensure your password meets all requirements before verifying email.");
+        return;
+    }
+    if (!passwordsMatch) {
+        setError("Passwords do not match.");
+        return;
+    }
+
     setLoading(true);
     try {
       const res = await fetch("/api/auth/otp/request", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         // Force role to DELIVERY here 👇
-        body: JSON.stringify({ email: email.trim().toLowerCase(), role: "DELIVERY" }),
+        body: JSON.stringify({ 
+            email: email.trim().toLowerCase(), 
+            role: "DELIVERY",
+            name: name, // Send name along
+            isRegister: true
+        }),
       });
       const data = await res.json();
       
@@ -48,6 +107,12 @@ export default function DeliveryRegisterPage() {
     setError("");
     setLoading(true);
 
+    if (otp.length < 6) {
+        setError("Please enter the full 6-digit OTP.");
+        setLoading(false);
+        return;
+    }
+
     try {
       const res = await fetch("/api/auth/otp/verify", {
         method: "POST",
@@ -57,7 +122,7 @@ export default function DeliveryRegisterPage() {
           email: email.trim().toLowerCase(),
           otp,
           password,
-          role: "DELIVERY" // Ensure backend knows the intent
+          role: "DELIVERY" 
         }),
       });
 
@@ -94,8 +159,8 @@ export default function DeliveryRegisterPage() {
           </div>
         )}
 
+        {/* --- DETAILS & PASSWORD FORM --- */}
         {!otpSent ? (
-          /* --- STEP 1: DETAILS FORM --- */
           <form onSubmit={handleSendOtp} className="space-y-5">
             
             {/* Name Input */}
@@ -130,34 +195,55 @@ export default function DeliveryRegisterPage() {
               </div>
             </div>
 
-            {/* Password Input */}
+            {/* --- PASSWORD FIELD (NEW) --- */}
             <div className="space-y-2">
               <label className="text-xs font-bold text-gray-500 uppercase tracking-wider ml-1">Create Password</label>
-              <div className="relative">
-                <Lock className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 h-5 w-5" />
-                <input
-                  type={showPassword ? "text" : "password"}
-                  required
+              <PasswordInput
+                  id="password"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder="••••••••"
-                  minLength={6}
-                  className="w-full h-14 pl-12 pr-12 rounded-2xl bg-white border border-gray-200 text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-black/10 focus:border-black transition-all"
+                  showToggle={showPassword}
+                  setShowToggle={setShowPassword}
+                  isInvalid={password && !passwordValidation.isValid}
+              />
+              
+              {/* Validation Hint */}
+              <ul className="text-xs text-gray-500 space-y-0.5 ml-2 pt-1">
+                  <li className={`flex items-center ${passwordValidation.hasLength ? 'text-green-600' : 'text-red-500'}`}>
+                      {passwordValidation.hasLength ? <Check className="h-3 w-3 mr-1" /> : <X className="h-3 w-3 mr-1" />} 8+ characters
+                  </li>
+                  <li className={`flex items-center ${passwordValidation.hasNumber ? 'text-green-600' : 'text-red-500'}`}>
+                      {passwordValidation.hasNumber ? <Check className="h-3 w-3 mr-1" /> : <X className="h-3 w-3 mr-1" />} At least 1 number
+                  </li>
+                  <li className={`flex items-center ${passwordValidation.hasSpecial ? 'text-green-600' : 'text-red-500'}`}>
+                      {passwordValidation.hasSpecial ? <Check className="h-3 w-3 mr-1" /> : <X className="h-3 w-3 mr-1" />} Special char (@, !, $)
+                  </li>
+              </ul>
+            </div>
+            
+            {/* --- CONFIRM PASSWORD FIELD (NEW) --- */}
+            <div className="space-y-2">
+                <label className="text-xs font-bold text-gray-500 uppercase tracking-wider ml-1">Confirm Password</label>
+                <PasswordInput
+                    id="confirmPassword"
+                    value={confirmPassword}
+                    onChange={(e) => setConfirmPassword(e.target.value)}
+                    placeholder="••••••••"
+                    showToggle={showConfirmPassword}
+                    setShowToggle={setShowConfirmPassword}
+                    isInvalid={confirmPassword && !passwordsMatch}
                 />
-                <button
-                  type="button"
-                  onClick={() => setShowPassword(!showPassword)}
-                  className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 p-1"
-                  tabIndex="-1"
-                >
-                  {showPassword ? <EyeOff size={20} /> : <Eye size={20} />}
-                </button>
-              </div>
+                {confirmPassword && !passwordsMatch && (
+                  <p className="text-xs text-red-500 font-medium ml-1">
+                    Passwords do not match.
+                  </p>
+                )}
             </div>
 
             <button
               type="submit"
-              disabled={loading}
+              disabled={loading || !passwordValidation.isValid || !passwordsMatch}
               className="w-full h-14 rounded-2xl bg-black text-white font-bold text-lg hover:bg-gray-900 active:scale-[0.98] transition-all flex items-center justify-center gap-2 shadow-lg shadow-gray-200 disabled:opacity-70"
             >
               {loading ? <Loader2 className="animate-spin" /> : "Send Verification Code"}

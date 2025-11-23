@@ -368,6 +368,12 @@ export default function ProductsPage() {
     });
   };
 
+  // --- NEW: Reset Filters Handler ---
+  const handleResetFilters = () => {
+    // Navigate to the base products page, clearing all query params
+    router.push("/products");
+  };
+
   const handleLocalFilterClick = () => {
     if (userLocation && userLocation.lat && userLocation.lng) {
       router.push(
@@ -620,7 +626,10 @@ export default function ProductsPage() {
                     Sort by:
                   </span>
                   <Select value={sortOption} onValueChange={handleSortChange}>
-                    <SelectTrigger className="w-[180px] border-none font-bold text-black bg-transparent focus:ring-0 p-0 h-auto gap-1 justify-end">
+                    <SelectTrigger 
+                      // --- UPDATED CLASS NAMES FOR RECTANGULAR, OPTIMIZED LOOK ---
+                      className="w-[180px] h-10 border border-gray-300 font-medium text-black bg-white focus:ring-1 focus:ring-black/5 p-3 text-sm gap-2 justify-start rounded-md"
+                    >
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent
@@ -641,6 +650,17 @@ export default function ProductsPage() {
                     </SelectContent>
                   </Select>
                 </div>
+
+                {/* --- NEW: Reset Button --- */}
+                <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleResetFilters}
+                    className="border-gray-300 text-gray-600 hover:bg-gray-100 rounded-md h-10"
+                >
+                    Reset
+                </Button>
+                {/* --- END NEW --- */}
               </div>
             </div>
 

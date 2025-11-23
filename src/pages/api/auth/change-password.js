@@ -1,7 +1,7 @@
 // src/pages/api/auth/change-password.js
-import dbConnect from "../../../../lib/dbConnect";
-import User from "../../../../models/User";
-import { verifyToken } from "../../../../lib/auth";
+import dbConnect from "../../../lib/dbConnect";
+import User from "../../../models/User";
+import { verifyToken } from "../../../lib/auth";
 import bcrypt from "bcryptjs";
 import mongoose from "mongoose";
 

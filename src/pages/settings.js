@@ -1,8 +1,9 @@
-import React, { useState } from 'react';
+// src/pages/settings.js
+import React, { useState, useMemo } from 'react'; // ADDED useMemo
 import { useRouter } from 'next/router';
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { AlertTriangle, Loader2, LogOut, Trash2, Settings, Mail, Lock, Shield, Check, X } from 'lucide-react';
+import { AlertTriangle, Loader2, LogOut, Trash2, Settings, Mail, Lock, Shield, Check, X, Eye, EyeOff } from 'lucide-react'; // ADDED Eye, EyeOff
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -27,6 +28,47 @@ import {
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import Link from 'next/link';
 
+// --- Password Validation Logic (NEW) ---
+const isValidNewPassword = (password) => {
+    // 1. Minimum 8 characters
+    const hasLength = password.length >= 8;
+    // 2. At least one number
+    const hasNumber = /\d/.test(password);
+    // 3. At least one special character: @, !, or $
+    const hasSpecial = /[@!$]/.test(password);
+    return { hasLength, hasNumber, hasSpecial, isValid: hasLength && hasNumber && hasSpecial };
+};
+
+// --- Custom Password Input Component (NEW) ---
+const PasswordInput = ({ id, value, onChange, placeholder, disabled, autoFocus, showToggle, setShowToggle, isInvalid }) => (
+  <div className="relative">
+      <Lock className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 h-5 w-5" />
+      <input
+        id={id}
+        type={showToggle ? "text" : "password"}
+        value={value}
+        onChange={onChange}
+        placeholder={placeholder}
+        disabled={disabled}
+        autoFocus={autoFocus}
+        required
+        className={`w-full h-14 pl-12 pr-12 rounded-2xl bg-white border text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-black/10 focus:border-black transition-all disabled:bg-gray-50 disabled:text-gray-500
+          ${isInvalid ? 'border-red-500 focus:border-red-500 focus:ring-red-200' : 'border-gray-200'}
+        `}
+      />
+      <button
+          type="button"
+          onClick={() => setShowToggle(prev => !prev)}
+          className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 p-1"
+          tabIndex="-1"
+      >
+          {showToggle ? <EyeOff size={20} /> : <Eye size={20} />}
+      </button>
+  </div>
+);
+// ------------------------------------
+
+
 export default function SettingsPage() {
   const router = useRouter();
   const [deleting, setDeleting] = useState(false);
@@ -41,6 +83,17 @@ export default function SettingsPage() {
   const [confirmPass, setConfirmPass] = useState("");
   const [passLoading, setPassLoading] = useState(false);
   const [passMessage, setPassMessage] = useState(null); // { type: 'success' | 'error', text: '' }
+  
+  // --- Password Visibility State (NEW) ---
+  const [showCurrentPass, setShowCurrentPass] = useState(false);
+  const [showNewPass, setShowNewPass] = useState(false);
+  const [showConfirmPass, setShowConfirmPass] = useState(false);
+
+  // --- Derived Validation (NEW) ---
+  const newPassValidation = useMemo(() => isValidNewPassword(newPass), [newPass]);
+  const newPasswordsMatch = newPass && confirmPass && newPass === confirmPass;
+  const isFormValid = currentPass && newPass && confirmPass && newPasswordsMatch && newPassValidation.isValid;
+
 
   const handleLogout = async () => {
     try {
@@ -94,23 +147,24 @@ export default function SettingsPage() {
     }
   };
 
-  // --- CHANGE PASSWORD LOGIC ---
+  // --- CHANGE PASSWORD LOGIC (UPDATED VALIDATION) ---
   const handleChangePassword = async (e) => {
     e.preventDefault();
     setPassMessage(null);
     
+    // 1. Client-Side Validation
     if (!currentPass || !newPass || !confirmPass) {
         setPassMessage({ type: 'error', text: "All fields are required." });
         return;
     }
     
-    if (newPass !== confirmPass) {
-        setPassMessage({ type: 'error', text: "New passwords do not match." });
+    if (!newPassValidation.isValid) {
+        setPassMessage({ type: 'error', text: "New password does not meet requirements." });
         return;
     }
     
-    if (newPass.length < 8) {
-        setPassMessage({ type: 'error', text: "New password must be at least 8 characters." });
+    if (!newPasswordsMatch) {
+        setPassMessage({ type: 'error', text: "New passwords do not match." });
         return;
     }
 
@@ -178,7 +232,7 @@ export default function SettingsPage() {
                <p className="font-medium text-sm">Password</p>
                <p className="text-xs text-gray-500">Change your current password.</p>
             </div>
-            <Button variant="outline" onClick={() => setIsPassModalOpen(true)}>
+            <Button variant="outline" onClick={() => { setIsPassModalOpen(true); setPassMessage(null); }}>
                 Change Password
             </Button>
           </CardContent>
@@ -264,7 +318,7 @@ export default function SettingsPage() {
         </Card>
       </div>
 
-      {/* --- CHANGE PASSWORD MODAL --- */}
+      {/* --- CHANGE PASSWORD MODAL (UPDATED) --- */}
       <Dialog open={isPassModalOpen} onOpenChange={(open) => { if(!open) { setIsPassModalOpen(false); setPassMessage(null); } }}>
         <DialogContent className="sm:max-w-[425px]">
             <DialogHeader>
@@ -274,44 +328,62 @@ export default function SettingsPage() {
                 </DialogDescription>
             </DialogHeader>
             
-            <form onSubmit={handleChangePassword} className="space-y-4 py-2">
+            <form onSubmit={handleChangePassword} className="space-y-5">
+                
+                {/* 1. Current Password */}
                 <div className="space-y-2">
                     <Label htmlFor="currentPass">Current Password</Label>
-                    <Input 
-                        id="currentPass" 
-                        type="password" 
+                    <PasswordInput
+                        id="currentPass"
                         value={currentPass}
                         onChange={(e) => setCurrentPass(e.target.value)}
                         placeholder="••••••••"
-                        required
+                        showToggle={showCurrentPass}
+                        setShowToggle={setShowCurrentPass}
                     />
                 </div>
                 
+                {/* 2. New Password */}
                 <div className="space-y-2">
                     <Label htmlFor="newPass">New Password</Label>
-                    <Input 
-                        id="newPass" 
-                        type="password" 
+                    <PasswordInput
+                        id="newPass"
                         value={newPass}
                         onChange={(e) => setNewPass(e.target.value)}
                         placeholder="••••••••"
-                        required
+                        showToggle={showNewPass}
+                        setShowToggle={setShowNewPass}
+                        isInvalid={newPass && !newPassValidation.isValid}
                     />
+                    
+                    {/* Validation Hint (NEW) */}
+                    <ul className="text-xs text-gray-500 space-y-0.5 ml-2">
+                        <li className={`flex items-center ${newPassValidation.hasLength ? 'text-green-600' : 'text-red-500'}`}>
+                            {newPassValidation.hasLength ? <Check className="h-3 w-3 mr-1" /> : <X className="h-3 w-3 mr-1" />} 8+ characters
+                        </li>
+                        <li className={`flex items-center ${newPassValidation.hasNumber ? 'text-green-600' : 'text-red-500'}`}>
+                            {newPassValidation.hasNumber ? <Check className="h-3 w-3 mr-1" /> : <X className="h-3 w-3 mr-1" />} At least 1 number
+                        </li>
+                        <li className={`flex items-center ${newPassValidation.hasSpecial ? 'text-green-600' : 'text-red-500'}`}>
+                            {newPassValidation.hasSpecial ? <Check className="h-3 w-3 mr-1" /> : <X className="h-3 w-3 mr-1" />} Special char (@, !, $)
+                        </li>
+                    </ul>
                 </div>
                 
+                {/* 3. Confirm New Password */}
                 <div className="space-y-2">
                     <Label htmlFor="confirmPass">Confirm New Password</Label>
-                    <Input 
-                        id="confirmPass" 
-                        type="password" 
+                    <PasswordInput
+                        id="confirmPass"
                         value={confirmPass}
                         onChange={(e) => setConfirmPass(e.target.value)}
                         placeholder="••••••••"
-                        required
-                        className={confirmPass && newPass !== confirmPass ? "border-red-500 focus-visible:ring-red-500" : ""}
+                        showToggle={showConfirmPass}
+                        setShowToggle={setShowConfirmPass}
+                        isInvalid={confirmPass && !newPasswordsMatch}
                     />
-                    {confirmPass && newPass !== confirmPass && (
-                        <p className="text-xs text-red-500">Passwords do not match</p>
+                    {confirmPass && !newPasswordsMatch && (
+                        <p className="text-xs text-red-500 pl-1">Passwords do not match.</p>
                     )}
                 </div>
 
@@ -324,7 +396,7 @@ export default function SettingsPage() {
 
                 <DialogFooter className="pt-2">
                     <Button type="button" variant="outline" onClick={() => setIsPassModalOpen(false)}>Cancel</Button>
-                    <Button type="submit" disabled={passLoading || !currentPass || !newPass || !confirmPass || (newPass !== confirmPass)}>
+                    <Button type="submit" disabled={passLoading || !isFormValid}>
                         {passLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : "Update Password"}
                     </Button>
                 </DialogFooter>

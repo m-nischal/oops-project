@@ -42,7 +42,7 @@ export default class InventoryService {
    * Decrease stock for a specific product size by qty.
    * - Tries strict decrement first (stock >= qty).
    * - If strict fails, checks if product is a Proxy (linked to Wholesaler).
-   * - If Proxy, allows decrement into negative stock (Backorder).
+   * - If Proxy, allows decrement into negative stock (Backorder) AND DECREMENTS WHOLESALER'S STOCK.
    * * @param {String|ObjectId} productId
    * @param {String} sizeLabel
    * @param {Number} qty
@@ -81,7 +81,18 @@ export default class InventoryService {
         
         const forceRes = await Product.updateOne(forceFilter, update, options);
         
-        if ((forceRes.modifiedCount ?? forceRes.nModified ?? 0) > 0) return true;
+        if ((forceRes.modifiedCount ?? forceRes.nModified ?? 0) > 0) {
+            // *** CRITICAL FIX: DECREMENT THE WHOLESALER'S STOCK ***
+            await Product.updateOne(
+                {
+                    _id: product.wholesaleSourceId,
+                    "sizes.size": params.sizeLabel
+                },
+                { $inc: { "sizes.$.stock": -params.qty } },
+                options
+            );
+            return true;
+        }
     }
 
     // 3. Real Failure (Not enough stock AND not a proxy item, or size doesn't exist)
@@ -155,7 +166,7 @@ export default class InventoryService {
     const label = this._normalizeLabel(sizeLabel);
     if (!label) throw new InvalidParamsError("sizeLabel is required");
 
-    const doc = await Product.findById(productId, { sizes: 1 }).lean();
+    const doc = await Product.findById(productId, { sizes: 1, name: 1 }).lean();
     if (!doc || !Array.isArray(doc.sizes)) return 0;
     const s = doc.sizes.find(x => String(x.size).trim() === label);
     return s ? Number(s.stock || 0) : 0;
@@ -210,7 +221,7 @@ export default class InventoryService {
          const product = await Product.findById(it.productId).session(session).select("wholesaleSourceId name").lean();
          
          if (product && product.wholesaleSourceId) {
-             // It IS a proxy item. Allow negative stock.
+             // It IS a proxy item. Allow negative stock on the retailer's product.
              const forceFilter = { 
                  _id: it.productId, 
                  "sizes.size": it.sizeLabel 
@@ -218,8 +229,19 @@ export default class InventoryService {
 
              const forceRes = await Product.updateOne(forceFilter, update, { session });
              
-             // If force update failed, it means the size label doesn't exist or product missing
-             if ((forceRes.modifiedCount ?? forceRes.nModified ?? 0) === 0) {
+             // If force update succeeded, we MUST decrement wholesaler stock too
+             if ((forceRes.modifiedCount ?? forceRes.nModified ?? 0) > 0) {
+                 // *** CRITICAL FIX: DECREMENT THE WHOLESALER'S STOCK ***
+                 await Product.updateOne(
+                    {
+                        _id: product.wholesaleSourceId,
+                        "sizes.size": it.sizeLabel
+                    },
+                    { $inc: { "sizes.$.stock": -it.qty } },
+                    { session }
+                );
+             } else {
+                 // If force update failed, it means the size label doesn't exist or product missing
                  throw new InsufficientStockError(`Size '${it.sizeLabel}' not found for product ${product.name || it.productId}`);
              }
          } else {

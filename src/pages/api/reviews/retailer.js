@@ -11,6 +11,7 @@ export default async function handler(req, res) {
   if (!session) return res.status(401).json({ error: "Unauthorized" });
 
   const { retailerId, rating, comment } = req.body;
+  const numericRating = Number(rating);
 
   try {
     const retailer = await User.findById(retailerId);
@@ -22,14 +23,24 @@ export default async function handler(req, res) {
 
     const existingIndex = retailer.Feedback.findIndex(r => String(r.reviewerId) === userIdStr);
 
+    // --- CRITICAL FIX START: Handle Deletion (rating: 0) ---
+    if (existingIndex > -1 && numericRating === 0 && comment === "") {
+        // If review exists AND payload signifies deletion (rating 0, empty comment)
+        retailer.Feedback.splice(existingIndex, 1);
+        await retailer.save();
+        return res.status(200).json({ success: true, message: "Review deleted" });
+    }
+    // --- CRITICAL FIX END ---
+
     const feedbackData = {
       reviewerId: session.user._id,
-      rating: Number(rating),
+      rating: numericRating,
       comment,
       author: session.user.name || "Customer",
       createdAt: new Date()
     };
 
+    // Handle Update or Creation
     if (existingIndex > -1) {
         // Overwrite existing feedback
         retailer.Feedback[existingIndex] = feedbackData;
@@ -40,7 +51,7 @@ export default async function handler(req, res) {
 
     await retailer.save();
 
-    return res.status(200).json({ success: true });
+    return res.status(200).json({ success: true, message: "Review saved/updated" });
   } catch (err) {
     return res.status(500).json({ error: err.message });
   }

@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import { useRouter } from "next/router";
 import Link from "next/link";
 import { signIn } from "next-auth/react";
@@ -14,7 +14,49 @@ import {
   Truck,
   Eye,
   EyeOff,
+  Check,
+  X,
 } from "lucide-react";
+import { Input } from "@/components/ui/input";
+
+// --- Password Validation Logic (NEW) ---
+const isValidNewPassword = (password) => {
+    // 1. Minimum 8 characters
+    const hasLength = password.length >= 8;
+    // 2. At least one number
+    const hasNumber = /\d/.test(password);
+    // 3. At least one special character: @, !, or $
+    const hasSpecial = /[@!$]/.test(password);
+    return { hasLength, hasNumber, hasSpecial, isValid: hasLength && hasNumber && hasSpecial };
+};
+
+// --- Custom Password Input Component (NEW) ---
+const PasswordInput = ({ id, value, onChange, placeholder, showToggle, setShowToggle, isInvalid }) => (
+  <div className="relative">
+      <Lock className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 h-5 w-5" />
+      <input
+        id={id}
+        type={showToggle ? "text" : "password"}
+        value={value}
+        onChange={onChange}
+        placeholder={placeholder}
+        required
+        className={`w-full h-14 pl-12 pr-12 rounded-2xl bg-white border text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-black/10 focus:border-black transition-all 
+          ${isInvalid ? 'border-red-500 focus:border-red-500 focus:ring-red-200' : 'border-gray-200'}
+        `}
+      />
+      <button
+          type="button"
+          onClick={() => setShowToggle(prev => !prev)}
+          className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 p-1"
+          tabIndex="-1"
+      >
+          {showToggle ? <EyeOff size={20} /> : <Eye size={20} />}
+      </button>
+  </div>
+);
+// ------------------------------------
+
 
 export default function RegisterPage() {
   const router = useRouter();
@@ -26,7 +68,10 @@ export default function RegisterPage() {
 
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
+  
+  // --- Password Visibility State (NEW) ---
   const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
 
   const [message, setMessage] = useState("");
   const [otpSent, setOtpSent] = useState(false);
@@ -40,13 +85,6 @@ export default function RegisterPage() {
 
   function isValidEmail(value) {
     return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
-  }
-
-  function isValidPassword(value) {
-    const hasLength = value.length >= 8;
-    const hasNumber = /\d/.test(value);
-    const hasSpecial = /[!@#$%^&*(),.?":{}|<>]/.test(value);
-    return hasLength && hasNumber && hasSpecial;
   }
 
   const handleOtpChange = (element, index) => {
@@ -126,15 +164,16 @@ export default function RegisterPage() {
 
     const trimmedEmail = email.trim().toLowerCase();
     const code = otp.join("");
+    const validation = isValidNewPassword(password);
 
     if (!isValidEmail(trimmedEmail) || code.length !== 6) {
       setMessage("Please enter a valid email and complete the OTP.");
       return;
     }
 
-    if (!isValidPassword(password)) {
+    if (!validation.isValid) {
       setMessage(
-        "Password must be at least 8 characters, with a number and special character."
+        "Password must be at least 8 characters, with a number and special character (@, !, $)."
       );
       return;
     }
@@ -196,6 +235,12 @@ export default function RegisterPage() {
     }
   }
 
+  // --- Derived Validation State (NEW) ---
+  const passwordValidation = useMemo(() => isValidNewPassword(password), [password]);
+  const passwordsMatch = password && confirmPassword && password === confirmPassword;
+  // -------------------------------------
+
+
   const RoleCard = ({ value, label, icon: Icon }) => (
     <div
       onClick={() => !otpSent && setRole(value)}
@@ -209,10 +254,6 @@ export default function RegisterPage() {
       <div className="text-xs font-bold uppercase">{label}</div>
     </div>
   );
-
-  const passwordsMatch =
-    password && confirmPassword && password === confirmPassword;
-  const passwordValid = isValidPassword(password);
 
   return (
     <div className="w-full min-h-screen flex items-center justify-center p-6 bg-gradient-to-br from-blue-50 via-white to-gray-100">
@@ -264,14 +305,14 @@ export default function RegisterPage() {
               type="button"
               onClick={handleSendOtp}
               disabled={loading}
-              className="w-full h-14 rounded-2xl bg-black text-white font-bold text-lg hover:bg-gray-900 active:scale-[0.98] transition-all flex items-center justify-center gap-2"
+              className="w-full h-14 rounded-2xl bg-black text-white font-bold text-lg hover:bg-gray-900 active:scale-[0.98] transition-all flex items-center justify-center gap-2 shadow-lg shadow-gray-200"
             >
               {loading ? <Loader2 className="animate-spin" /> : "Verify Email"}
               {!loading && <ArrowRight size={20} />}
             </button>
           ) : (
             <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4">
-              <div className="p-4 bg-blue-50 text-blue-700 rounded-xl text-sm flex items-start gap-3">
+              <div className="p-4 bg-blue-50 text-blue-700 rounded-xl text-sm flex items-start gap-3 border border-blue-100">
                 <CheckCircle2 className="w-5 h-5 shrink-0 mt-0.5" />
                 <div>
                   OTP sent to <strong>{email}</strong>.
@@ -307,51 +348,49 @@ export default function RegisterPage() {
               </div>
 
               <div className="space-y-3">
-                <div className="relative">
-                  <Lock className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 h-5 w-5" />
-                  <input
-                    type={showPassword ? "text" : "password"}
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    placeholder="Create Password"
-                    className="w-full h-14 pl-12 pr-12 rounded-2xl bg-white border border-gray-200 text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-black/10 focus:border-black transition-all"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowPassword(!showPassword)}
-                    className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 p-1"
-                    tabIndex="-1"
-                  >
-                    {showPassword ? <EyeOff size={20} /> : <Eye size={20} />}
-                  </button>
+                
+                {/* --- NEW PASSWORD INPUT --- */}
+                <div className="space-y-2">
+                    <PasswordInput
+                        value={password}
+                        onChange={(e) => setPassword(e.target.value)}
+                        placeholder="Create Password"
+                        showToggle={showPassword}
+                        setShowToggle={setShowPassword}
+                        isInvalid={password && !passwordValidation.isValid}
+                    />
+                     {/* Validation Hint (NEW) */}
+                    <ul className="text-xs text-gray-500 space-y-0.5 ml-2 pt-1">
+                        <li className={`flex items-center ${passwordValidation.hasLength ? 'text-green-600' : 'text-red-500'}`}>
+                            {passwordValidation.hasLength ? <Check className="h-3 w-3 mr-1" /> : <X className="h-3 w-3 mr-1" />} 8+ characters
+                        </li>
+                        <li className={`flex items-center ${passwordValidation.hasNumber ? 'text-green-600' : 'text-red-500'}`}>
+                            {passwordValidation.hasNumber ? <Check className="h-3 w-3 mr-1" /> : <X className="h-3 w-3 mr-1" />} At least 1 number
+                        </li>
+                        <li className={`flex items-center ${passwordValidation.hasSpecial ? 'text-green-600' : 'text-red-500'}`}>
+                            {passwordValidation.hasSpecial ? <Check className="h-3 w-3 mr-1" /> : <X className="h-3 w-3 mr-1" />} Special char (@, !, $)
+                        </li>
+                    </ul>
+                </div>
+                
+                {/* --- CONFIRM PASSWORD INPUT --- */}
+                <div className="space-y-2">
+                    <PasswordInput
+                        value={confirmPassword}
+                        onChange={(e) => setConfirmPassword(e.target.value)}
+                        placeholder="Re-enter Password"
+                        showToggle={showConfirmPassword}
+                        setShowToggle={setShowConfirmPassword}
+                        isInvalid={confirmPassword && !passwordsMatch}
+                    />
+                    {password && confirmPassword && !passwordsMatch && (
+                      <p className="text-xs text-red-500 font-medium ml-1">
+                        Passwords do not match.
+                      </p>
+                    )}
                 </div>
 
-                {password && !passwordValid && (
-                  <p className="text-[10px] text-gray-500 pl-1">
-                    Must be 8+ chars, with a number & special character.
-                  </p>
-                )}
 
-                <div className="relative">
-                  <Lock className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 h-5 w-5" />
-                  <input
-                    type={showPassword ? "text" : "password"}
-                    value={confirmPassword}
-                    onChange={(e) => setConfirmPassword(e.target.value)}
-                    placeholder="Re-enter Password"
-                    className={`w-full h-14 pl-12 pr-4 rounded-2xl bg-white border text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 transition-all ${
-                      confirmPassword && !passwordsMatch
-                        ? "border-red-300 focus:border-red-500 focus:ring-red-100"
-                        : "border-gray-200 focus:border-black focus:ring-black/10"
-                    }`}
-                  />
-                </div>
-
-                {password && confirmPassword && !passwordsMatch && (
-                  <p className="text-xs text-red-500 font-medium ml-1">
-                    Passwords do not match.
-                  </p>
-                )}
               </div>
 
               <button
@@ -359,7 +398,7 @@ export default function RegisterPage() {
                 disabled={
                   loading ||
                   !passwordsMatch ||
-                  !passwordValid ||
+                  !passwordValidation.isValid ||
                   otp.join("").length !== 6
                 }
                 className="w-full h-14 rounded-2xl bg-black text-white font-bold text-lg hover:bg-gray-900 active:scale-[0.98] transition-all flex items-center justify-center gap-2 shadow-lg shadow-gray-200 disabled:opacity-50 disabled:cursor-not-allowed"

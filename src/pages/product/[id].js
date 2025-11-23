@@ -1,4 +1,3 @@
-// src/pages/product/[id].js
 import { useRouter } from "next/router";
 import { useEffect, useState, useRef, useCallback, useMemo } from "react";
 import Link from "next/link";
@@ -9,7 +8,7 @@ import ProductCard from "@/components/ProductCard";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Loader2, MapPinOff, Info, RefreshCw, MapPin, Truck, CheckCircle, MessageSquare, Star, Edit, Phone, Mail, Store } from "lucide-react";
+import { Loader2, MapPinOff, Info, RefreshCw, MapPin, Truck, CheckCircle, MessageSquare, Star, Edit, Phone, Mail, Store, XCircle } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -169,6 +168,13 @@ export default function ProductDetailPage() {
   const [locationError, setLocationError] = useState(false);
   const [showLocationHelp, setShowLocationHelp] = useState(false);
   const [customerLocation, setCustomerLocation] = useState(null);
+  
+  // --- New Global Pop-up State ---
+  const [showPopup, setShowPopup] = useState(false);
+  const [popupTitle, setPopupTitle] = useState("");
+  const [popupMessage, setPopupMessage] = useState("");
+  const [popupAction, setPopupAction] = useState(null); // { label: string, onClick: function }
+  // -------------------------------
 
   // --- REVIEW STATES (Product) ---
   const [currentUserId, setCurrentUserId] = useState(null);
@@ -199,6 +205,15 @@ export default function ProductDetailPage() {
   // ****************************************************
   // *********** HOISTED CALLBACK DEFINITIONS ***********
   // ****************************************************
+  
+  // NEW HANDLER: Show custom Dialog Pop-up
+  const showUIPopup = useCallback((title, message, action = null) => {
+      setPopupTitle(title);
+      setPopupMessage(message);
+      setPopupAction(action);
+      setShowPopup(true);
+  }, []);
+
 
   // NEW HANDLER: For the Check Availability button
   const handleCheckAvailability = useCallback(() => {
@@ -215,9 +230,10 @@ export default function ProductDetailPage() {
               setProxyCheckState('checked_unavailable');
               setQty(0); // Cannot order
               prevQtyRef.current = 0;
+              showUIPopup("Out of Stock", "The wholesaler also appears to be out of stock for this item. Please check again later.");
           }
       }, 500); // Simulate network delay
-  }, [isProxyProduct, isLocalStockZeroOrLess, selectedProxyStock, qty]);
+  }, [isProxyProduct, isLocalStockZeroOrLess, selectedProxyStock, qty, showUIPopup]);
 
   // Fetch Retailer/Owner Data
   const fetchOwnerData = useCallback(async (ownerId) => {
@@ -360,8 +376,8 @@ export default function ProductDetailPage() {
   // New Handler to open the Review Form Modal
   const handleOpenRetailerReviewForm = (isEditing) => {
     if (!currentUserId) {
-        alert("Please log in to leave a review.");
-        router.push("/login");
+        // alert("Please log in to leave a review."); // OLD
+        showUIPopup("Login Required", "You must be logged in to leave a review.", { label: "Go to Login", onClick: () => router.push("/login") });
         return;
     }
     
@@ -370,15 +386,15 @@ export default function ProductDetailPage() {
         setRetailerReviewRating(userRetailerReview.rating);
         setRetailerReviewComment(userRetailerReview.comment);
     } else {
-        setRetailerReviewRating(5);
-        setRetailerReviewComment("");
+        setReviewRating(5);
+        setReviewComment("");
     }
     
     setIsRetailerReviewFormOpen(true);
     setIsRetailerReviewModalOpen(false); // Close main modal if open
   }
 
-  // New Delete Handler for Retailer Review
+  // New Delete Handler for Retailer Review (FIXED)
   const handleDeleteRetailerReview = async () => {
     if (!ownerData || !currentUserId) return;
 
@@ -389,26 +405,31 @@ export default function ProductDetailPage() {
         if (!token) throw new Error("Not authenticated.");
 
         // --- MOCK DELETE IMPLEMENTATION: Post empty review to clear it ---
-        // This relies on the server-side API to overwrite the existing review
+        // This is the functional "delete" as per the existing codebase design.
         const res = await fetch("/api/reviews/retailer", {
             method: "POST", 
             headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
             body: JSON.stringify({ 
                 retailerId: ownerData.id, 
-                rating: 0, // Clear the rating
-                comment: "" // Clear the comment
+                rating: 0, 
+                comment: "" 
             }),
         });
 
         if (!res.ok) throw new Error("Failed to delete retailer review.");
         
-        alert("Retailer review deleted successfully.");
+        showUIPopup("Success!", "Retailer review deleted successfully.");
         
-        // Reload page to refresh all reviews/stats
-        window.location.reload(); 
+        // --- CRITICAL FIX: Optimistic UI Update and Refresh Data ---
+        setUserRetailerReview(null); // Remove the user's review state
+        
+        // Refresh all data, including owner's rating and feedback list
+        fetchOwnerData(ownerData.id); 
+        // -----------------------------------------------------------
 
     } catch (e) {
-        alert(e.message);
+        console.error(e);
+        showUIPopup("Action Failed", e.message);
     } finally {
         setIsSubmittingRetailerReview(false);
     }
@@ -436,14 +457,17 @@ export default function ProductDetailPage() {
 
         if (!res.ok) throw new Error("Failed to submit retailer review.");
 
-        alert(userRetailerReview ? "Retailer review updated successfully!" : "Retailer review submitted successfully!");
+        // alert(userRetailerReview ? "Retailer review updated successfully!" : "Retailer review submitted successfully!"); // OLD
+        showUIPopup("Success!", userRetailerReview ? "Retailer review updated successfully!" : "Retailer review submitted successfully!");
         setIsRetailerReviewFormOpen(false); // Close the form modal
         
         // Reload page to refresh all reviews/stats
         window.location.reload(); 
 
     } catch (e) {
-        alert(e.message);
+        console.error(e);
+        // alert(e.message); // OLD
+        showUIPopup("Action Failed", e.message);
     } finally {
         setIsSubmittingRetailerReview(false);
     }
@@ -453,8 +477,8 @@ export default function ProductDetailPage() {
   // --- Existing Product Review Handlers ---
   const handleWriteReview = (isEditing) => {
     if (!currentUserId) {
-        alert("Please log in to leave a review.");
-        router.push("/login");
+        // alert("Please log in to leave a review."); // OLD
+        showUIPopup("Login Required", "You must be logged in to leave a review.", { label: "Go to Login", onClick: () => router.push("/login") });
         return;
     }
     
@@ -488,7 +512,8 @@ export default function ProductDetailPage() {
 
         if (!res.ok) throw new Error("Failed to submit review.");
 
-        alert(userReview ? "Review updated successfully!" : "Review submitted successfully!");
+        // alert(userReview ? "Review updated successfully!" : "Review submitted successfully!"); // OLD
+        showUIPopup("Success!", userReview ? "Review updated successfully!" : "Review submitted successfully!");
         setIsReviewModalOpen(false);
         setShowOverwriteAlert(false); // Close overwrite alert if it was open
         
@@ -496,7 +521,9 @@ export default function ProductDetailPage() {
         window.location.reload(); 
 
     } catch (e) {
-        alert(e.message);
+        console.error(e);
+        // alert(e.message); // OLD
+        showUIPopup("Action Failed", e.message);
     } finally {
         setIsSubmittingReview(false);
     }
@@ -704,7 +731,8 @@ export default function ProductDetailPage() {
     newQty = Math.floor(Math.max(1, newQty));
     
     if (newQty > maxStock) {
-        alert(`Maximum available units is ${maxStock}.`);
+        // alert(`Maximum available units is ${maxStock}.`); // OLD
+        showUIPopup("Quantity Limit", `Maximum available units is ${maxStock}.`);
         newQty = maxStock;
     }
     
@@ -717,7 +745,8 @@ export default function ProductDetailPage() {
     const maxStock = maxQtyLimit;
     
     if (newQty > maxStock) {
-        alert(`Only ${maxStock} units available in total.`);
+        // alert(`Only ${maxStock} units available in total.`); // OLD
+        showUIPopup("Quantity Limit", `Only ${maxStock} units available in total.`);
         return;
     }
     setQty(newQty);
@@ -731,7 +760,7 @@ export default function ProductDetailPage() {
   }
   
   async function handleAddToCart() {
-    if (!product) { alert("Product not loaded"); return; }
+    if (!product) { showUIPopup("Cart Error", "Product not loaded."); return; }
     
     const desiredTotalQty = Number(qty) || 1; // The value from the input field
     setAdding(true);
@@ -741,16 +770,22 @@ export default function ProductDetailPage() {
       const pid = String(product._id || product.id);
       const sizeLabel = selectedSize;
 
-      if (!sizeLabel) { alert("Please select a size."); return; }
+      if (!sizeLabel) { 
+        // alert("Please select a size."); // OLD
+        showUIPopup("Missing Selection", "Please select a size.");
+        return; 
+      }
       
       // CRITICAL CHECK for proxy: must have checked availability for this size
       if (isProxyProduct && isLocalStockZeroOrLess) {
           if (proxyCheckState !== 'checked_available' || selectedProxyStock <= 0) {
-              alert("Please check stock availability first.");
+              // alert("Please check stock availability first."); // OLD
+              showUIPopup("Stock Check Required", "Please check stock availability first.");
               return;
           }
           if (desiredTotalQty > selectedProxyStock) {
-              alert(`Cannot order more than ${selectedProxyStock} units from wholesaler.`);
+              // alert(`Cannot order more than ${selectedProxyStock} units from wholesaler.`); // OLD
+              showUIPopup("Quantity Limit", `Cannot order more than ${selectedProxyStock} units from wholesaler.`);
               return;
           }
       }
@@ -792,7 +827,8 @@ export default function ProductDetailPage() {
       
     } catch (err) {
       console.error(err);
-      alert("Error adding to cart");
+      // alert("Error adding to cart"); // OLD
+      showUIPopup("Cart Error", "Error adding to cart: " + err.message);
     } finally {
       setAdding(false);
     }
@@ -1289,7 +1325,7 @@ export default function ProductDetailPage() {
                             const isUserReview = userRetailerReview && feedback.comment === userRetailerReview.comment && feedback.author === userRetailerReview.author;
 
                             return (
-                                <div key={index} className={`p-4 border rounded-lg bg-white ${isUserReview ? 'border-blue-500 ring-1 ring-blue-200' : ''}`}>
+                                <div key={feedback._id || index} className={`p-4 border rounded-lg bg-white ${isUserReview ? 'border-blue-500 ring-1 ring-blue-200' : ''}`}>
                                     <div className="flex justify-between items-start">
                                         <div className="font-bold text-sm flex items-center">
                                             {feedback.author || 'Anonymous'}
@@ -1565,12 +1601,74 @@ export default function ProductDetailPage() {
                 </div>
             </DialogContent>
         </Dialog>
+        
+        {/* --- GLOBAL UI POPUP --- */}
+        <UIPopup 
+            isOpen={showPopup}
+            onClose={() => setShowPopup(false)}
+            title={popupTitle}
+            message={popupMessage}
+            action={popupAction}
+        />
+        
     </div>
   );
 }
 
 // -----------------------------------------------------------
-// TAB COMPONENTS
+// NEW COMPONENT: UIPopup to replace alert()
+// -----------------------------------------------------------
+function UIPopup({ isOpen, onClose, title, message, action }) {
+    
+    let Icon = Info;
+    let color = "text-blue-600";
+    if (title.includes("Success")) {
+        Icon = CheckCircle;
+        color = "text-green-600";
+    } else if (title.includes("Error") || title.includes("Failed") || title.includes("Limit")) {
+        Icon = XCircle;
+        color = "text-red-600";
+    } else if (title.includes("Required")) {
+        Icon = AlertTriangle;
+        color = "text-yellow-600";
+    }
+
+    return (
+        <Dialog open={isOpen} onOpenChange={onClose}>
+            <DialogContent className="sm:max-w-xs">
+                <DialogHeader className="text-center">
+                    <div className="flex justify-center mb-2">
+                        <Icon className={`h-10 w-10 ${color}`} />
+                    </div>
+                    <DialogTitle className="text-xl font-bold">{title}</DialogTitle>
+                    <DialogDescription className="text-gray-600 pt-2">
+                        {message}
+                    </DialogDescription>
+                </DialogHeader>
+                <DialogFooter className="mt-4">
+                    {action ? (
+                        <Button
+                            onClick={() => { onClose(); action.onClick(); }}
+                            className="w-full bg-black hover:bg-gray-800"
+                        >
+                            {action.label}
+                        </Button>
+                    ) : (
+                        <Button
+                            onClick={onClose}
+                            className="w-full bg-gray-500 hover:bg-gray-600"
+                        >
+                            OK
+                        </Button>
+                    )}
+                </DialogFooter>
+            </DialogContent>
+        </Dialog>
+    );
+}
+
+// -----------------------------------------------------------
+// TAB COMPONENTS (unchanged)
 // -----------------------------------------------------------
 const DETAIL_LABELS = {
   materialComposition: "Material Composition",

@@ -1,13 +1,11 @@
-// src/pages/index.js
 import React, { useEffect, useState } from 'react';
 import { useRouter } from 'next/router';
 import CustomerNavbar from '@/components/CustomerNavbar';
 import HeroSection from '@/components/home/HeroSection';
-import BrandStrip from '@/components/home/BrandStrip';
+// import BrandStrip from '@/components/home/BrandStrip'; // REMOVED
 import NewArrivals from '@/components/home/NewArrivals';
 import LocalProducts from '@/components/home/LocalProducts';
-import BrowseByStyle from '@/components/home/BrowseByStyle'; // <--- Import Added
-import Recommendations from '@/components/home/Recommendations'; // <--- NEW IMPORT
+import Recommendations from '@/components/home/Recommendations';
 import { Loader2 } from 'lucide-react';
 
 export default function HomePage() {
@@ -68,8 +66,7 @@ export default function HomePage() {
         {/* 2. Hero Section */}
         <HeroSection />
 
-        {/* 3. Brand Strip */}
-        <BrandStrip />
+        {/* 3. Brand Strip (Removed) */}
       </div>
 
       {/* CONTENT BELOW FOLD */}
@@ -77,10 +74,10 @@ export default function HomePage() {
         {/* 4. Local Products Section */}
         <LocalProducts />
         
-        {/* 5. Recommendations Section (NEW POSITIONED HERE) */}
+        {/* 5. Recommendations Section */}
         <Recommendations />
         
-        {/* 6. New Arrivals Section (MOVED DOWN) */}
+        {/* 6. New Arrivals Section */}
         <NewArrivals />
 
         {/* Divider Line */}
@@ -88,8 +85,7 @@ export default function HomePage() {
             <hr className="border-gray-200" />
         </div>
 
-        {/* 7. Browse By Dress Style Section */}
-        <BrowseByStyle />
+        {/* 7. Browse By Dress Style Section (REMOVED) */}
         
         {/* Footer Placeholder */}
         <div className="py-20 text-center text-gray-400 text-sm">
