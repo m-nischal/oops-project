@@ -1,3 +1,4 @@
+// src/components/RetailerLayout.jsx
 import React from "react";
 import Link from "next/link";
 import { useRouter } from "next/router";
@@ -24,7 +25,8 @@ import {
   Settings,
   History,
   Calculator,
-  Calendar
+  Calendar,
+  Star // ADDED: Star icon for reviews
 } from "lucide-react";
 
 function NavLink({ href, icon: Icon, children }) {
@@ -134,6 +136,13 @@ export default function RetailerLayout({ children }) {
                   <User className="mr-2 h-4 w-4" /> Profile
                 </Link>
               </DropdownMenuItem>
+              {/* --- NEW MENU ITEM: Customer Reviews --- */}
+              <DropdownMenuItem asChild>
+                <Link href="/retailer/reviews">
+                  <Star className="mr-2 h-4 w-4" /> Customer Reviews
+                </Link>
+              </DropdownMenuItem>
+              {/* -------------------------------------- */}
               <DropdownMenuItem asChild>
                 <Link href="/settings">
                   <Settings className="mr-2 h-4 w-4" /> Settings

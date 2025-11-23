@@ -17,10 +17,10 @@ export default async function handler(req, res) {
 
   const userId = new mongoose.Types.ObjectId(payload.id);
 
-  // GET: Fetch user profile (Selecting 'phone' field)
+  // GET: Fetch user profile (Selecting 'phone' field and Feedback)
   if (req.method === "GET") {
     try {
-      const user = await User.findById(userId).select("name email role addresses phone").lean();
+      const user = await User.findById(userId).select("name email role addresses phone Feedback").lean();
       if (!user) {
         return res.status(404).json({ error: "User not found." });
       }
@@ -31,14 +31,13 @@ export default async function handler(req, res) {
     }
   }
 
-  // PUT: Update user profile (name, addresses, phone)
+  // PUT: Update user profile (name, addresses, phone, and preserve Feedback)
   if (req.method === "PUT") {
     try {
       const { name, addresses, phone } = req.body;
       
       const updateFields = {};
       if (name !== undefined) updateFields.name = String(name).trim();
-      // Added phone to update fields
       if (phone !== undefined) updateFields.phone = String(phone).trim(); 
 
       if (addresses !== undefined && Array.isArray(addresses)) {
@@ -49,7 +48,7 @@ export default async function handler(req, res) {
         userId,
         { $set: updateFields },
         { new: true, runValidators: true }
-      ).select("name email role addresses phone").lean(); // Select phone on return
+      ).select("name email role addresses phone Feedback").lean();
 
       if (!updatedUser) {
         return res.status(404).json({ error: "User not found." });
