@@ -1,13 +1,15 @@
 // src/pages/api/orders/[id].js
-import dbConnect from "lib/dbConnect.js";
-import OrderService from "services/orderService.js";
+import dbConnect from "../../../lib/dbConnect";
+import OrderService from "../../../services/orderService";
 
 /**
  * GET  /api/orders/:id    -> returns order
  * PATCH /api/orders/:id  -> update status, small edits
  */
 export default async function handler(req, res) {
-  try { await dbConnect(); } catch (err) {
+  try {
+    await dbConnect();
+  } catch (err) {
     console.error("DB connect failed:", err);
     return res.status(500).json({ error: "Database connection failed" });
   }
@@ -30,14 +32,8 @@ export default async function handler(req, res) {
       const { status, restoreStock = false, fulfillment, payment, meta } = req.body || {};
       if (!status) return res.status(400).json({ error: "status is required" });
 
-      // support optional metadata updates later (fulfillment/payment) by the service if needed
       const updated = await OrderService.updateStatus(id, status, { restoreStock });
-      // Merge optional small updates (tracking number etc.) by refetch+patch if provided
-      if ((fulfillment && Object.keys(fulfillment).length) || (payment && Object.keys(payment).length) || meta) {
-        // simple naive patch: get by id and assign fields then save via the model through OrderService.getById + model save
-        // To keep separation of concerns we return updated and let frontend call dedicated endpoints for deeper edits.
-      }
-
+      
       return res.status(200).json(updated);
     } catch (err) {
       console.error("PATCH /api/orders/[id] error:", err);

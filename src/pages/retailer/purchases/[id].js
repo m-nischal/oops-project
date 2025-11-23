@@ -1,31 +1,11 @@
-import React, { useEffect, useState, useCallback } from "react";
+import React, { useEffect, useState } from "react";
 import { useRouter } from "next/router";
 import Link from "next/link";
-import CustomerNavbar from "@/components/CustomerNavbar";
+import RetailerLayout from "@/components/RetailerLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogDescription,
-  DialogFooter,
-} from "@/components/ui/dialog";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
-import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
 import {
   Loader2,
   ChevronRight,
@@ -36,16 +16,12 @@ import {
   CheckCircle,
   Clock,
   XCircle,
-  ArrowLeft,
   AlertCircle,
   Store,
-  Star,
   Phone,
   Mail,
-  MessageSquare,
 } from "lucide-react";
 
-// --- HELPERS ---
 const formatPrice = (p) => `₹${Number(p || 0).toLocaleString("en-IN")}`;
 
 const formatDate = (dateStr) => {
@@ -101,31 +77,18 @@ const getStatusBadge = (status) => {
   );
 };
 
-export default function OrderDetailsPage() {
+export default function RetailerOrderDetailsPage() {
   const router = useRouter();
   const { id } = router.query;
   const [order, setOrder] = useState(null);
-  const [retailer, setRetailer] = useState(null);
+  const [wholesaler, setWholesaler] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
-  // Review Modal State
-  const [isReviewModalOpen, setIsReviewModalOpen] = useState(false);
-  const [reviewType, setReviewType] = useState("product");
-  const [reviewTargetId, setReviewTargetId] = useState(null);
-  const [reviewTargetName, setReviewTargetName] = useState("");
-  const [reviewRating, setReviewRating] = useState(5);
-  const [reviewComment, setReviewComment] = useState("");
-  const [isSubmittingReview, setIsSubmittingReview] = useState(false);
+  useEffect(() => {
+    if (!id) return;
 
-  // Overwrite Logic State
-  const [hasExistingReview, setHasExistingReview] = useState(false);
-  const [showOverwriteAlert, setShowOverwriteAlert] = useState(false);
-
-  const fetchOrderData = useCallback(
-    async (isSilent = false) => {
-      if (!id) return;
-      if (!isSilent) setLoading(true);
+    async function fetchOrder() {
       try {
         const token = localStorage.getItem("token");
         const headers = token ? { Authorization: `Bearer ${token}` } : {};
@@ -141,6 +104,7 @@ export default function OrderDetailsPage() {
         const orderData = data.order || data;
         setOrder(orderData);
 
+        // Fetch Wholesaler Details (Seller)
         if (orderData.sellerId) {
           try {
             const userRes = await fetch(
@@ -148,136 +112,58 @@ export default function OrderDetailsPage() {
             );
             if (userRes.ok) {
               const userData = await userRes.json();
-              setRetailer(userData);
+              setWholesaler(userData);
             }
           } catch (err) {
-            console.error("Retailer fetch failed", err);
+            console.error(err);
           }
         }
       } catch (e) {
         setError(e.message);
       } finally {
-        if (!isSilent) setLoading(false);
+        setLoading(false);
       }
-    },
-    [id, router]
-  );
-
-  useEffect(() => {
-    fetchOrderData();
-  }, [fetchOrderData]);
-
-  const openReviewModal = async (type, id, name) => {
-    setReviewType(type);
-    setReviewTargetId(id);
-    setReviewTargetName(name);
-    setReviewRating(5);
-    setReviewComment("");
-
-    setHasExistingReview(false);
-    try {
-      const res = await fetch(`/api/reviews/check?type=${type}&targetId=${id}`);
-      if (res.ok) {
-        const data = await res.json();
-        if (data.exists) setHasExistingReview(true);
-      }
-    } catch (e) {
-      console.error("Failed to check review status", e);
     }
+    fetchOrder();
+  }, [id, router]);
 
-    setIsReviewModalOpen(true);
-  };
-
-  const performReviewSubmit = async () => {
-    setIsSubmittingReview(true);
-    try {
-      const token = localStorage.getItem("token");
-      const endpoint =
-        reviewType === "product"
-          ? "/api/reviews/product"
-          : "/api/reviews/retailer";
-      const body = {
-        rating: reviewRating,
-        comment: reviewComment,
-        [reviewType === "product" ? "productId" : "retailerId"]: reviewTargetId,
-      };
-
-      const res = await fetch(endpoint, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify(body),
-      });
-
-      if (!res.ok) throw new Error("Failed to submit review");
-
-      alert(
-        `${
-          reviewType === "product" ? "Product" : "Retailer"
-        } review submitted successfully!`
-      );
-      setIsReviewModalOpen(false);
-      setShowOverwriteAlert(false);
-      await fetchOrderData(true);
-    } catch (e) {
-      alert(e.message);
-    } finally {
-      setIsSubmittingReview(false);
-    }
-  };
-
-  const handleInitialSubmit = () => {
-    if (hasExistingReview) {
-      setShowOverwriteAlert(true);
-    } else {
-      performReviewSubmit();
-    }
-  };
-
-  if (loading && !order)
+  if (loading)
     return (
-      <>
-        <CustomerNavbar />
+      <RetailerLayout>
         <div className="flex justify-center items-center h-96">
           <Loader2 className="h-8 w-8 animate-spin text-gray-400" />
         </div>
-      </>
+      </RetailerLayout>
     );
   if (error || !order)
     return (
-      <>
-        <CustomerNavbar />
+      <RetailerLayout>
         <div className="max-w-4xl mx-auto p-10 text-center">
           <div className="bg-red-50 text-red-600 p-4 rounded-xl inline-flex items-center gap-2 mb-6">
             <AlertCircle className="h-5 w-5" /> {error || "Order not found"}
           </div>
           <br />
-          <Link href="/orders">
-            <Button variant="outline">Return to Order History</Button>
+          <Link href="/retailer/purchases">
+            <Button variant="outline">Return to History</Button>
           </Link>
         </div>
-      </>
+      </RetailerLayout>
     );
 
   const currentStepIndex = getStatusIndex(order.status);
   const isCancelled =
     order.status === "cancelled" || order.status === "refunded";
-  const isDelivered = order.status === "delivered";
 
   return (
-    <div className="min-h-screen bg-gray-50 font-sans pb-20">
-      <CustomerNavbar />
-
-      <main className="max-w-5xl mx-auto px-6 py-8">
+    <RetailerLayout>
+      <div className="max-w-5xl mx-auto pb-10">
         <nav className="flex items-center text-sm text-gray-500 mb-6">
-          <Link href="/" className="hover:text-black transition-colors">
-            Home
+          <Link href="/retailer/dashboard" className="hover:text-black">
+            Dashboard
           </Link>
           <ChevronRight className="h-4 w-4 mx-2" />
-          <Link href="/orders" className="hover:text-black transition-colors">
-            Orders
+          <Link href="/retailer/purchases" className="hover:text-black">
+            Purchases
           </Link>
           <ChevronRight className="h-4 w-4 mx-2" />
           <span className="font-semibold text-black">
@@ -287,7 +173,9 @@ export default function OrderDetailsPage() {
 
         <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-8">
           <div>
-            <h1 className="text-3xl font-black text-gray-900">Order Details</h1>
+            <h1 className="text-3xl font-black text-gray-900">
+              Purchase Details
+            </h1>
             <p className="text-gray-500 text-sm mt-1">
               Order ID:{" "}
               <span className="font-mono text-black font-medium">
@@ -300,9 +188,7 @@ export default function OrderDetailsPage() {
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-          {/* LEFT COLUMN: Timeline & Items & Shipping Details */}
           <div className="lg:col-span-2 space-y-6">
-            {/* Timeline Card */}
             {!isCancelled && (
               <Card className="border-none shadow-sm">
                 <CardContent className="p-8">
@@ -355,17 +241,21 @@ export default function OrderDetailsPage() {
               </Card>
             )}
 
-            {/* Items List */}
             <Card className="border-gray-200 shadow-sm overflow-hidden">
               <CardHeader className="bg-gray-50/50 border-b border-gray-100">
-                <CardTitle className="text-lg">Items in this Order</CardTitle>
+                <CardTitle className="text-lg">Items Purchased</CardTitle>
               </CardHeader>
               <CardContent className="p-0">
                 {order.items.map((item, idx) => (
                   <div
                     key={idx}
                     className="flex gap-4 p-6 border-b border-gray-50 last:border-none hover:bg-gray-50/50 transition-colors items-center cursor-pointer group"
-                    onClick={() => router.push(`/product/${item.productId}`)}
+                    // UPDATED: Redirects to Wholesale Market Search for this item
+                    onClick={() =>
+                      router.push(
+                        `/retailer/stock?q=${encodeURIComponent(item.name)}`
+                      )
+                    }
                   >
                     <div className="h-24 w-24 bg-gray-100 rounded-xl flex items-center justify-center flex-shrink-0 overflow-hidden border border-gray-100">
                       <Package className="h-8 w-8 text-gray-300" />
@@ -389,39 +279,25 @@ export default function OrderDetailsPage() {
                           {item.qty}
                         </span>
                       </p>
-
-                      {isDelivered && (
-                        <Button
-                          variant="link"
-                          className="p-0 h-auto text-blue-600 mt-2 text-sm font-semibold"
-                          onClick={(e) => {
-                            e.stopPropagation(); // Prevent navigation
-                            openReviewModal(
-                              "product",
-                              item.productId,
-                              item.name
-                            );
-                          }}
-                        >
-                          Write a Review
-                        </Button>
-                      )}
+                      <p className="text-sm text-gray-500 mt-1">
+                        Total:{" "}
+                        <span className="font-medium text-black">
+                          {formatPrice(item.subtotal)}
+                        </span>
+                      </p>
                     </div>
-                    {/* Mobile Arrow Indicator */}
-                    <ChevronRight className="h-5 w-5 text-gray-300 group-hover:text-blue-500 transition-colors md:hidden" />
+                    <ChevronRight className="h-5 w-5 text-gray-300 group-hover:text-blue-500 transition-colors" />
                   </div>
                 ))}
               </CardContent>
             </Card>
 
-            {/* Shipping & Payment Details (Moved & Horizontal) */}
             <Card className="border-gray-200 shadow-sm">
               <CardHeader className="pb-4 border-b border-gray-100 bg-gray-50/30">
                 <CardTitle className="text-lg">Shipping & Payment</CardTitle>
               </CardHeader>
               <CardContent className="p-6">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                  {/* Address Section */}
                   <div className="flex gap-4">
                     <div className="bg-blue-50 p-2.5 rounded-xl h-fit border border-blue-100">
                       <MapPin className="h-5 w-5 text-blue-600" />
@@ -441,8 +317,6 @@ export default function OrderDetailsPage() {
                       </p>
                     </div>
                   </div>
-
-                  {/* Payment Section */}
                   <div className="flex gap-4">
                     <div className="bg-green-50 p-2.5 rounded-xl h-fit border border-green-100">
                       <CreditCard className="h-5 w-5 text-green-600" />
@@ -457,15 +331,11 @@ export default function OrderDetailsPage() {
                       <p className="text-sm text-gray-500 mt-1">
                         {order.payment?.paidAt ? (
                           <span className="text-green-600 flex items-center gap-1 font-medium">
-                            <CheckCircle className="w-3.5 h-3.5" /> Paid on{" "}
-                            {new Date(
-                              order.payment.paidAt
-                            ).toLocaleDateString()}
+                            <CheckCircle className="w-3.5 h-3.5" /> Paid
                           </span>
                         ) : (
                           <span className="text-orange-600 font-medium flex items-center gap-1">
-                            <Clock className="w-3.5 h-3.5" /> Payment Pending /
-                            COD
+                            <Clock className="w-3.5 h-3.5" /> Pending
                           </span>
                         )}
                       </p>
@@ -476,9 +346,7 @@ export default function OrderDetailsPage() {
             </Card>
           </div>
 
-          {/* RIGHT COLUMN: Summary & Retailer Info */}
           <div className="space-y-6">
-            {/* Order Summary */}
             <Card className="border-gray-200 shadow-sm">
               <CardHeader className="pb-4">
                 <CardTitle>Order Summary</CardTitle>
@@ -512,10 +380,10 @@ export default function OrderDetailsPage() {
               </CardContent>
             </Card>
 
-            {/* Retailer Info */}
+            {/* Wholesaler Info Card */}
             <Card className="border-gray-200 shadow-sm bg-gray-50">
               <CardContent className="p-5">
-                {retailer ? (
+                {wholesaler ? (
                   <div className="space-y-4">
                     <div className="flex items-start gap-4">
                       <div className="h-12 w-12 bg-white rounded-full flex items-center justify-center shadow-sm border border-gray-100 flex-shrink-0">
@@ -523,63 +391,27 @@ export default function OrderDetailsPage() {
                       </div>
                       <div className="flex-1">
                         <p className="text-xs font-bold text-gray-400 uppercase mb-1">
-                          Sold By
+                          Supplier
                         </p>
-                        <div className="flex justify-between items-start">
-                          <p className="font-bold text-gray-900 text-base">
-                            {retailer.name}
-                          </p>
-                          {isDelivered && (
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              className="h-8 text-xs ml-2"
-                              onClick={() =>
-                                openReviewModal(
-                                  "retailer",
-                                  order.sellerId,
-                                  retailer.name
-                                )
-                              }
-                            >
-                              Rate Seller
-                            </Button>
-                          )}
-                        </div>
-                        <div className="flex items-center gap-1 mt-1">
-                          <div className="flex">
-                            {[...Array(5)].map((_, i) => (
-                              <Star
-                                key={i}
-                                className={`h-3 w-3 ${
-                                  i < Math.round(retailer.rating || 0)
-                                    ? "text-yellow-400 fill-yellow-400"
-                                    : "text-gray-300"
-                                }`}
-                              />
-                            ))}
-                          </div>
-                          <span className="text-xs text-gray-500 font-medium ml-1">
-                            ({retailer.reviewCount || 0} reviews)
-                          </span>
-                        </div>
+                        <p className="font-bold text-gray-900 text-base">
+                          {wholesaler.name}
+                        </p>
                       </div>
                     </div>
-
-                    {(retailer.email || retailer.phone) && (
+                    {(wholesaler.email || wholesaler.phone) && (
                       <>
                         <Separator className="bg-gray-200" />
                         <div className="space-y-2 pt-1">
-                          {retailer.phone && (
+                          {wholesaler.phone && (
                             <div className="flex items-center gap-2 text-sm text-gray-600">
                               <Phone className="h-4 w-4 text-gray-400" />{" "}
-                              <span>{retailer.phone}</span>
+                              <span>{wholesaler.phone}</span>
                             </div>
                           )}
-                          {retailer.email && (
+                          {wholesaler.email && (
                             <div className="flex items-center gap-2 text-sm text-gray-600">
                               <Mail className="h-4 w-4 text-gray-400" />{" "}
-                              <span>{retailer.email}</span>
+                              <span>{wholesaler.email}</span>
                             </div>
                           )}
                         </div>
@@ -588,105 +420,15 @@ export default function OrderDetailsPage() {
                   </div>
                 ) : (
                   <div className="flex items-center gap-3 text-gray-500 text-sm">
-                    <Loader2 className="h-4 w-4 animate-spin" /> Loading seller
-                    info...
+                    <Loader2 className="h-4 w-4 animate-spin" /> Loading
+                    supplier info...
                   </div>
                 )}
               </CardContent>
             </Card>
           </div>
         </div>
-      </main>
-
-      {/* REVIEW MODAL */}
-      <Dialog open={isReviewModalOpen} onOpenChange={setIsReviewModalOpen}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>Rate & Review</DialogTitle>
-            <DialogDescription>
-              Share your experience with <strong>{reviewTargetName}</strong>
-            </DialogDescription>
-          </DialogHeader>
-
-          <div className="flex justify-center gap-2 py-4">
-            {[1, 2, 3, 4, 5].map((star) => (
-              <Star
-                key={star}
-                className={`h-8 w-8 cursor-pointer transition-all ${
-                  star <= reviewRating
-                    ? "text-yellow-400 fill-yellow-400 scale-110"
-                    : "text-gray-300 hover:text-yellow-200"
-                }`}
-                onClick={() => setReviewRating(star)}
-              />
-            ))}
-          </div>
-
-          <div className="space-y-2">
-            <label className="text-sm font-medium text-gray-700">
-              Your Comments
-            </label>
-            <Textarea
-              placeholder={
-                reviewType === "product"
-                  ? "How is the quality? Does it fit well?"
-                  : "How was the packaging? Was the delivery fast?"
-              }
-              value={reviewComment}
-              onChange={(e) => setReviewComment(e.target.value)}
-              rows={4}
-            />
-          </div>
-
-          <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => setIsReviewModalOpen(false)}
-            >
-              Cancel
-            </Button>
-            <Button
-              onClick={handleInitialSubmit}
-              disabled={isSubmittingReview}
-              className="bg-black text-white"
-            >
-              {isSubmittingReview ? (
-                <Loader2 className="h-4 w-4 animate-spin mr-2" />
-              ) : (
-                <MessageSquare className="h-4 w-4 mr-2" />
-              )}
-              Submit Review
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* OVERWRITE CONFIRMATION ALERT */}
-      <AlertDialog
-        open={showOverwriteAlert}
-        onOpenChange={setShowOverwriteAlert}
-      >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Overwrite Review?</AlertDialogTitle>
-            <AlertDialogDescription>
-              You have already reviewed this {reviewType}. Submitting a new
-              review will overwrite your previous rating and comment.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel onClick={() => setShowOverwriteAlert(false)}>
-              Cancel
-            </AlertDialogCancel>
-            <AlertDialogAction
-              onClick={performReviewSubmit}
-              className="bg-black text-white"
-            >
-              Yes, Overwrite
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-    </div>
+      </div>
+    </RetailerLayout>
   );
 }

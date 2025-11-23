@@ -23,6 +23,7 @@ import {
   Warehouse,
   User, 
   Settings,
+  History // Imported History Icon
 } from "lucide-react";
 
 function NavLink({ href, icon: Icon, children }) {
@@ -49,9 +50,7 @@ export default function RetailerLayout({ children }) {
   
   const handleLogout = async () => {
     try {
-        // Clear Server Cookie
         await fetch("/api/auth/logout", { method: "POST" });
-        // Clear Client Token
         localStorage.removeItem("token"); 
         router.push("/login"); 
     } catch (e) {
@@ -79,17 +78,20 @@ export default function RetailerLayout({ children }) {
           <NavLink href="/retailer/products" icon={Package}>
             MY SHOP (LIVE)
           </NavLink>
-          <Separator className="bg-gray-700" />
           <NavLink href="/retailer/inventory" icon={Warehouse}>
             INVENTORY
           </NavLink>
-          <Separator className="bg-gray-700" />
           <NavLink href="/retailer/orders" icon={ShoppingCart}>
-            ORDER LIST
+            CUSTOMER ORDERS
           </NavLink>
           <Separator className="bg-gray-700" />
+          <div className="px-2 text-xs font-semibold text-gray-400 tracking-wider">WHOLESALE MARKET</div>
           <NavLink href="/retailer/stock" icon={ShoppingBag}>
-            WHOLESALER MARKETPLACE
+            BROWSE & STOCK
+          </NavLink>
+          {/* NEW LINK */}
+          <NavLink href="/retailer/purchases" icon={History}>
+            PURCHASE HISTORY
           </NavLink>
         </nav>
       </aside>
@@ -108,7 +110,7 @@ export default function RetailerLayout({ children }) {
               <Button variant="ghost" size="icon" className="rounded-full">
                 <Avatar className="h-8 w-8">
                   <AvatarImage src="/path-to-avatar.png" alt="Admin" />
-                  <AvatarFallback>A</AvatarFallback>
+                  <AvatarFallback>R</AvatarFallback>
                 </Avatar>
               </Button>
             </DropdownMenuTrigger>
