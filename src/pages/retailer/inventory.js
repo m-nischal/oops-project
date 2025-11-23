@@ -1,13 +1,20 @@
-// src/pages/retailer/inventory.js
 import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import RetailerLayout from '../../components/RetailerLayout';
 import { useAuthGuard } from '../../hooks/useAuthGuard';
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge"; // Import Badge
+import { Badge } from "@/components/ui/badge"; 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { AlertTriangle, Loader2, Edit, Archive, CheckCircle } from "lucide-react";
+
+// --- HELPER TO CALCULATE TOTAL STOCK ON THE FLY ---
+function calculateTotalStock(product) {
+  if (Array.isArray(product.sizes)) {
+    return product.sizes.reduce((acc, s) => acc + (Number(s.stock) || 0), 0);
+  }
+  return product.totalStock || 0;
+}
 
 export default function InventoryPage() {
   const { isLoading: isAuthLoading } = useAuthGuard("RETAILER");
@@ -24,7 +31,6 @@ export default function InventoryPage() {
         const token = localStorage.getItem("token");
         const authHeaders = { 'Authorization': `Bearer ${token}` };
 
-        // --- CHANGE: Removed 'status=draft' to fetch ALL products ---
         const res = await fetch(`/api/retailer/products?limit=100`, {
           headers: authHeaders,
           cache: 'no-store'
@@ -70,7 +76,6 @@ export default function InventoryPage() {
         {products.map(product => (
           <Card key={product._id} className={`border-2 ${product.isPublished ? 'border-green-100 bg-white' : 'border-dashed bg-gray-50/50'}`}>
             <CardHeader className="pb-2 relative">
-              {/* --- Status Badge --- */}
               <div className="absolute top-4 right-4">
                 {product.isPublished ? (
                   <Badge className="bg-green-500 hover:bg-green-600"><CheckCircle className="w-3 h-3 mr-1" /> Live</Badge>
@@ -80,7 +85,8 @@ export default function InventoryPage() {
               </div>
               
               <CardTitle className="text-lg truncate pr-16">{product.name}</CardTitle>
-              <CardDescription>Total Stock: {product.totalStock || 0}</CardDescription>
+              {/* --- FIX: Use helper function instead of raw field --- */}
+              <CardDescription>Total Stock: {calculateTotalStock(product)}</CardDescription>
             </CardHeader>
             <CardContent>
               <div className="h-32 bg-gray-100 rounded-md mb-2 flex items-center justify-center overflow-hidden">

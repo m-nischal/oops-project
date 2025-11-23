@@ -23,7 +23,6 @@ import {
   MapPin, 
   Edit, 
   RefreshCw, 
-  ArrowRight,
   CreditCard,
   QrCode,
   Truck,
@@ -43,7 +42,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 
 // --- HELPERS ---
 const formatPrice = (p) => `₹${Number(p || 0).toLocaleString('en-IN')}`;
@@ -58,7 +57,6 @@ function getStockForSize(product, sizeLabel) {
   return Number(sizeObj?.totalAvailable ?? sizeObj?.stock ?? 0);
 }
 
-// Card Number display formatting
 function formatCardNumberDisplay(value) {
     const cleaned = String(value || '').replace(/\D/g, '').slice(0, 16);
     return cleaned.match(/.{1,4}/g)?.join(' ') || '';
@@ -69,19 +67,15 @@ function validateCard(details) {
     const cleanedCvv = String(details.cvv || '').replace(/\D/g, '').slice(0, 3);
     const cleanedName = String(details.name || '').trim();
 
-    // 1. Card Number (must be 16 digits)
     if (cleanedNumber.length !== 16) return "Card number must be exactly 16 digits.";
-    
-    // 2. CVV (must be 3 digits)
     if (cleanedCvv.length !== 3) return "CVV must be exactly 3 digits.";
 
-    // 3. Expiry (MM/YY format, stricter validation)
     const [monthStr, yearStr] = details.expiry.split('/');
     const month = Number(monthStr);
     const year = Number(yearStr);
     const currentDate = new Date();
     const currentYear = currentDate.getFullYear() % 100;
-    const currentMonth = currentDate.getMonth() + 1; // getMonth returns 0-11
+    const currentMonth = currentDate.getMonth() + 1; 
     
     if (!monthStr || !yearStr || monthStr.length !== 2 || yearStr.length !== 2) {
          return "Expiry date must be in MM/YY format.";
@@ -94,12 +88,10 @@ function validateCard(details) {
         return "Card has expired.";
     }
     
-    // CRITICAL FIX: If year is current year, check the month
     if (year === currentYear && month < currentMonth) {
         return "Card has expired.";
     }
 
-    // 4. Cardholder Name (must not be empty, only alphabets and spaces)
     if (cleanedName.length === 0) return "Cardholder name cannot be empty.";
     if (/[^a-zA-Z\s]/.test(cleanedName)) return "Cardholder name can only contain alphabets and spaces.";
 
@@ -108,26 +100,19 @@ function validateCard(details) {
 
 function validateUpiId(id) {
     const cleanedId = String(id || '').trim();
-
-    // 1. Check for invalid characters (allow only alphanumeric, @, and .)
     if (/[^a-zA-Z0-9@.]/.test(cleanedId)) {
         return "UPI ID contains invalid characters. Only letters, numbers, '@', and '.' are allowed.";
     }
-
-    // 2. Check for existence of '@'
     if (!cleanedId.includes('@')) return "UPI ID must contain '@'.";
-    
-    // 3. Check parts before and after '@'
     const parts = cleanedId.split('@');
     if (parts.length !== 2) return "UPI ID must contain exactly one '@' symbol.";
     if (parts[0].length === 0) return "UPI ID must have characters before '@'.";
     if (parts[1].length === 0) return "UPI ID must have characters after '@'.";
-    
     return null;
 }
 
 function generateMockOtp() {
-    return Math.floor(100000 + Math.random() * 900000).toString(); // 6-digit OTP
+    return Math.floor(100000 + Math.random() * 900000).toString(); 
 }
 
 
@@ -137,7 +122,6 @@ const emptyAddress = {
     location: null 
 };
 
-// Payment options with a hierarchy for UI grouping
 const PAYMENT_OPTIONS = [
     { id: 'COD', label: 'Cash on Delivery (COD)', icon: Truck, group: 'Offline' },
     { id: 'Card', label: 'Credit/Debit Card', icon: CreditCard, group: 'Online' },
@@ -161,15 +145,11 @@ export default function CheckoutPage() {
   const [isShippingComplete, setIsShippingComplete] = useState(false);
   
   const [checkoutInfo, setCheckoutInfo] = useState(emptyAddress);
-  const [selectedAddressId, setSelectedAddressId] = useState(null);
   
   // --- UPDATED PAYMENT STATE ---
-  // Default to COD as requested
   const [selectedPaymentMethod, setSelectedPaymentMethod] = useState(PAYMENT_OPTIONS[0].id); 
   const [upiId, setUpiId] = useState('');
-  const [cardDetails, setCardDetails] = useState({
-      number: '', expiry: '', cvv: '', name: '',
-  });
+  const [cardDetails, setCardDetails] = useState({ number: '', expiry: '', cvv: '', name: '' });
 
   // --- Payment Flow State ---
   const [isOtpModalOpen, setIsOtpModalOpen] = useState(false);
@@ -181,17 +161,15 @@ export default function CheckoutPage() {
   const [finalPaymentMethod, setFinalPaymentMethod] = useState(null);
   const [finalPaymentId, setFinalPaymentId] = useState(null);
   
-  // --- New Failure State ---
+  // --- Modal States ---
   const [showPaymentFailureModal, setShowPaymentFailureModal] = useState(false);
   const [paymentErrorMessage, setPaymentErrorMessage] = useState(null);
-
-  // --- New Modal State ---
   const [showCardModal, setShowCardModal] = useState(false);
   const [showUpiIdModal, setShowUpiIdModal] = useState(false);
   const [showUpiQrModal, setShowUpiQrModal] = useState(false); 
-
   const [isAddressModalOpen, setIsAddressModalOpen] = useState(false);
   const [showManualModal, setShowManualModal] = useState(false);
+  const [isBillModalOpen, setIsBillModalOpen] = useState(false);
 
   const [showBrowserBackWarning, setShowBrowserBackWarning] = useState(false);
   const [targetUrl, setTargetUrl] = useState(null);
@@ -241,27 +219,20 @@ export default function CheckoutPage() {
   const totalSubtotalBeforeDiscount = itemsWithDetails.reduce((s, item) => s + item.subtotalBeforeDiscount, 0);
   const totalFee = typeof deliveryData?.totalDeliveryFee === 'number' ? deliveryData.totalDeliveryFee : 0;
   const grandTotal = (totalSubtotalBeforeDiscount - totalDiscountAmount) + totalFee;
+  const maxDeliveryDate = deliveryData?.estimatedDeliveryDate ? new Date(deliveryData.estimatedDeliveryDate).toLocaleDateString('en-IN', { month: 'short', day: 'numeric', year: 'numeric' }) : 'N/A';
   
-  const isCartValidForCheckout = itemsWithDetails.length > 0 && 
-                                 !loading && 
-                                 !cartError && 
-                                 itemsWithDetails.every(item => item.isAvailable);
-  // **************************************************
-  // ********* END DERIVED CALCULATIONS ***************
-  // **************************************************
+  const isCartValidForCheckout = itemsWithDetails.length > 0 && !loading && !cartError && itemsWithDetails.every(item => item.isAvailable);
 
 
   // **************************************************
   // *********** CRITICAL CALLBACKS *****************
   // **************************************************
 
-  // --- PAYMENT FAILURE HANDLER (Redirects to /cart) ---
+  // --- PAYMENT FAILURE HANDLER ---
   const handlePaymentFailure = useCallback((message) => {
     setIsOtpModalOpen(false);
     setPaymentInitiating(false);
     setLoading(false);
-    
-    // Redirect to cart and pass the failure message in query
     router.push(`/cart?paymentFailed=${encodeURIComponent(message || "Payment Failed")}`);
   }, [router]);
   
@@ -290,8 +261,8 @@ export default function CheckoutPage() {
     
     try {
       const res = await fetch("/api/orders", {
-        method:"POST", 
-        headers:{"Content-Type":"application/json"},
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ 
             customer: customerPayload, 
             items: itemsPayload,
@@ -307,35 +278,32 @@ export default function CheckoutPage() {
         const err = await res.json();
         throw new Error(err.message || "Order creation failed");
       }
-      const order = await res.json();
+      
+      const data = await res.json(); 
 
-      // Clear local storage and redirect
       localStorage.removeItem("lm_cart");
       localStorage.removeItem("livemart_cart");
       localStorage.removeItem("livemart_active_address_full"); 
       window.dispatchEvent(new Event("livemart-cart-update"));
       
-      // COD uses the full page success screen, others navigate to order detail
+      const orderList = data.orders || [data];
+      const primaryOrderId = orderList[0]?._id;
+
       if (paymentMethodNote === 'COD') {
-        setFinalPaymentId(order._id);
+        setFinalPaymentId(primaryOrderId);
         setIsOrderComplete(true);
       } else {
-        router.replace(`/order/${order._id}`);
+        router.replace(`/order/${primaryOrderId}`);
       }
       
-    } catch (e) {
+    }catch (e) {
       setSubmissionError("Order Failed: " + (e.message || e));
       console.error(e);
-      // If server order creation fails, redirect to cart on failure
       handlePaymentFailure("Order Finalization Failed: " + (e.message || "Unknown Error"));
     } finally { 
       setLoading(false); 
     }
   }, [checkoutInfo, itemsWithDetails, router, handlePaymentFailure]);
-
-  // **************************************************
-  // ********* END CRITICAL CALLBACKS *****************
-  // **************************************************
 
 
   // --- OTP TIMER LOGIC ---
@@ -356,8 +324,6 @@ export default function CheckoutPage() {
     }
     return () => clearInterval(otpTimerRef.current);
   }, [isOtpModalOpen, otpTimer, handlePaymentFailure]);
-  // --- END OTP TIMER LOGIC ---
-
 
   // --- MAIN PLACE ORDER INITIATOR ---
   const handlePlaceOrder = async () => {
@@ -373,33 +339,29 @@ export default function CheckoutPage() {
     setSubmissionError(null);
     setPaymentInitiating(true);
 
-    // --- Check Validity / Open Modal / Proceed to OTP ---
-    
     if (selectedPaymentMethod === 'Card') {
         const validationError = validateCard(cardDetails);
         if (validationError) {
             setSubmissionError(validationError); 
-            setShowCardModal(true); // Open modal for input/correction
+            setShowCardModal(true); 
             setPaymentInitiating(false);
             return;
         }
-        // Validation passed: proceed to OTP
         setFinalPaymentMethod('Card');
         const mock = generateMockOtp();
         setMockOtp(mock);
         setOtpInput('');
-        setOtpTimer(30); // 30 seconds timer
+        setOtpTimer(30); 
         setIsOtpModalOpen(true);
         
     } else if (selectedPaymentMethod === 'UPI_ID') {
         const validationError = validateUpiId(upiId);
         if (validationError) {
             setSubmissionError(validationError);
-            setShowUpiIdModal(true); // Open modal for input/correction
+            setShowUpiIdModal(true);
             setPaymentInitiating(false);
             return;
         }
-        // Validation passed: proceed to OTP
         setFinalPaymentMethod(`UPI (ID: ${upiId})`);
         const mock = generateMockOtp();
         setMockOtp(mock);
@@ -408,13 +370,11 @@ export default function CheckoutPage() {
         setIsOtpModalOpen(true);
         
     } else if (selectedPaymentMethod === 'COD') {
-        // Direct Finalization (COD)
         const paymentId = `COD_${Date.now()}`;
         setFinalPaymentMethod('COD');
         await handleFinalizeOrder(paymentId, 'COD');
     
     } else if (selectedPaymentMethod === 'UPI_QR') {
-        // OPEN QR CODE MODAL
         setFinalPaymentMethod('UPI (QR Scan)');
         setShowUpiQrModal(true);
     }
@@ -443,14 +403,13 @@ export default function CheckoutPage() {
     }
   };
   
-  // --- OTP SUBMISSION HANDLER (FIXED) ---
+  // --- OTP SUBMISSION HANDLER ---
   const handleOtpSubmit = async () => {
     if (otpInput === mockOtp) {
         setIsOtpModalOpen(false);
         setLoading(true);
-        setSubmissionError(null); // Clear any previous error message
+        setSubmissionError(null);
 
-        // Mock the final server charge call before finalizing order
         try {
             const payRes = await fetch("/api/payments/mock/charge", {
                 method: "POST", headers: { "Content-Type": "application/json" },
@@ -460,13 +419,11 @@ export default function CheckoutPage() {
             if (!payRes.ok || !payData.success) {
                 throw new Error(payData.error || "Payment processing failed.");
             }
-            // Payment success, proceed to order finalization
             await handleFinalizeOrder(payData.paymentId, finalPaymentMethod);
         } catch (e) {
             handlePaymentFailure("Payment Processing Failed: " + (e.message || "Unknown error"));
         }
     } else {
-        // FAIL: Incorrect OTP entered
         handlePaymentFailure("Payment failed: Invalid OTP entered.");
     }
   };
@@ -476,20 +433,16 @@ export default function CheckoutPage() {
     if (cartItems.length === 0) return;
     try {
       const uniqueIds = [...new Set(cartItems.map(i => i.productId))];
-      
       const promises = uniqueIds.map(id => 
           fetch(`/api/products/${id}`).then(r => r.ok ? r.json() : null)
       );
-      
       const results = await Promise.all(promises);
-      
       const detailsMap = {};
       results.forEach(data => {
           if (data && data.product) {
               detailsMap[String(data.product._id)] = data.product;
           }
       });
-      
       setProductDetails(detailsMap);
     } catch (err) {
       console.error("Failed to fetch product details:", err);
@@ -560,17 +513,23 @@ export default function CheckoutPage() {
     setShowManualModal(false);
   };
 
-  const handleInfoChange = useCallback((newData) => { setCheckoutInfo(newData); }, []);
-  
+  // --- NEW: Handle updating editable contact fields ---
+  const handleContactInfoChange = (field, value) => {
+      setCheckoutInfo(prev => ({
+          ...prev,
+          [field]: value
+      }));
+  };
+
   const handleShippingContinue = () => {
       setSubmissionError(null); 
       if (!isCartValidForCheckout) {
           setCartError("One or more items are out of stock. Please return to cart to adjust.");
           return;
       }
-      
-      if (!checkoutInfo.addressLine1 || !checkoutInfo.city || !checkoutInfo.phone) {
-          setCartError("Please fill all required shipping and contact details.");
+      // Check for address (read-only from location) AND contact info (editable)
+      if (!checkoutInfo.addressLine1 || !checkoutInfo.city || !checkoutInfo.email || !checkoutInfo.phone) {
+          setCartError("Please ensure all shipping and contact details are filled.");
           return;
       }
 
@@ -602,7 +561,7 @@ export default function CheckoutPage() {
   };
 
 
-  // --- Initial Load Logic (Unchanged) ---
+  // --- Initial Load Logic ---
   useEffect(() => {
     const initialCart = loadCart();
     if (initialCart.length === 0) {
@@ -628,7 +587,6 @@ export default function CheckoutPage() {
       setLoading(true);
       
       let initialUser = null;
-      let initialAddress = null;
       let fullAddressObj = null;
       
       try {
@@ -646,12 +604,16 @@ export default function CheckoutPage() {
       const savedLoc = localStorage.getItem("livemart_active_location");
       const savedFullAddress = localStorage.getItem("livemart_active_address_full"); 
 
+      let initialAddress = null;
+
       if (savedFullAddress) {
           fullAddressObj = JSON.parse(savedFullAddress);
-          initialAddress = savedLoc ? JSON.parse(savedLoc) : {
+          initialAddress = {
               lat: fullAddressObj.location?.coordinates?.[1],
               lng: fullAddressObj.location?.coordinates?.[0],
-              city: fullAddressObj.city, pincode: fullAddressObj.pincode, addressLine1: fullAddressObj.addressLine1
+              city: fullAddressObj.city, 
+              pincode: fullAddressObj.pincode, 
+              addressLine1: fullAddressObj.addressLine1
           };
       } else if (savedLoc) {
           initialAddress = JSON.parse(savedLoc);
@@ -661,7 +623,9 @@ export default function CheckoutPage() {
           initialAddress = {
               lat: def.location.coordinates[1],
               lng: def.location.coordinates[0],
-              city: def.city, pincode: def.pincode, addressLine1: def.addressLine1,
+              city: def.city, 
+              pincode: def.pincode, 
+              addressLine1: def.addressLine1,
           };
       }
       
@@ -681,10 +645,8 @@ export default function CheckoutPage() {
               countryCode: fullAddressObj.countryCode || info.countryCode, 
               phone: fullAddressObj.phone || info.phone,
           };
-          setSelectedAddressId(fullAddressObj._id || 'manual');
       } else if (initialAddress) {
            info = { ...info, ...initialAddress, location: initialAddress };
-           setSelectedAddressId('manual');
       }
       
       if (initialUser?.email && !info.email) info.email = initialUser.email;
@@ -692,13 +654,21 @@ export default function CheckoutPage() {
       setCheckoutInfo(info);
       setCustomerLocation(initialAddress);
       
-      await fetchProductDetails(initialCart);
-      
-      setLoading(false);
+      if (initialCart.length > 0) {
+         const uniqueIds = [...new Set(initialCart.map(i => i.productId))];
+         Promise.all(uniqueIds.map(id => fetch(`/api/products/${id}`).then(r => r.ok ? r.json() : null)))
+             .then(results => {
+                 const detailsMap = {};
+                 results.forEach(data => {
+                     if (data && data.product) detailsMap[String(data.product._id)] = data.product;
+                 });
+                 setProductDetails(detailsMap);
+                 setLoading(false);
+             });
+      } else {
+         setLoading(false);
+      }
     }
-    
-    const handleLocationUpdate = () => init();
-    window.addEventListener("livemart-location-update", handleLocationUpdate);
     
     init();
     
@@ -706,8 +676,14 @@ export default function CheckoutPage() {
          window.removeEventListener("livemart-location-update", handleLocationUpdate);
          router.beforePopState(() => true);
     };
-  }, [router, fetchProductDetails]);
+  }, [router]);
   
+  // Handler definition was missing from useEffect deps in original code, adding here
+  const handleLocationUpdate = () => {
+      // Re-run init logic if location changes externally
+      if (typeof window !== 'undefined') window.location.reload();
+  };
+
   useEffect(() => {
     if (Object.keys(productDetails).length > 0 && customerLocation && cart.length > 0) {
         fetchDeliveryFee(cart, customerLocation);
@@ -715,19 +691,11 @@ export default function CheckoutPage() {
   }, [cart, productDetails, customerLocation, fetchDeliveryFee]);
 
 
-  if (loading || cart.length === 0 || isOrderComplete) {
-    if (isOrderComplete) {
-        return <FinalOrderSuccessScreen orderId={finalPaymentId} />;
-    }
-    if (!loading && cart.length === 0) return null; 
-    return (
-      <div className="flex justify-center items-center h-screen">
-        <Loader2 className="h-8 w-8 animate-spin text-gray-400" />
-      </div>
-    );
+  if (loading || cart.length === 0) {
+    return <div className="flex justify-center items-center h-screen"><Loader2 className="h-8 w-8 animate-spin text-gray-400" /></div>;
   }
 
-  // --- Shipping Summary Component (Unchanged) ---
+  // --- Shipping Summary Component ---
   const ShippingSummary = () => (
     <div className="p-6 md:p-8 space-y-4">
         <div className="flex justify-between items-start">
@@ -738,7 +706,7 @@ export default function CheckoutPage() {
                 <p className="text-gray-600 text-sm mt-2">Contact: {checkoutInfo.email} | {checkoutInfo.countryCode}{checkoutInfo.phone}</p>
             </div>
             <Button variant="outline" size="sm" onClick={() => {
-                setIsShippingComplete(false); // Go back to form state
+                setIsShippingComplete(false);
                 setActiveTab('shipping');
             }} className="mt-1">
                 <Edit className="h-4 w-4 mr-2" /> Edit
@@ -747,9 +715,8 @@ export default function CheckoutPage() {
     </div>
   );
 
-  // --- Payment Method Selection Component (Defined here for scope access) ---
   const PaymentOptions = () => {
-    const paymentActionDisabled = loading || paymentInitiating; // Button is always enabled if shipping is done
+    const paymentActionDisabled = loading || paymentInitiating; 
 
     return (
         <div className="p-6 md:p-8 space-y-6">
@@ -778,12 +745,11 @@ export default function CheckoutPage() {
                                     <span className="font-medium text-lg">{option.label}</span>
                                 </div>
                                 
-                                {/* Status Icon/Action Indicator (Replaced Edit button) */}
                                 {isSelected && (option.id === 'Card' || option.id === 'UPI_ID') && (
                                      <div 
                                         className="bg-white p-2 rounded-lg shadow-md border border-gray-200 cursor-pointer"
                                         onClick={(e) => {
-                                            e.stopPropagation(); // Prevents radio button click
+                                            e.stopPropagation(); 
                                             if (option.id === 'Card') setShowCardModal(true);
                                             if (option.id === 'UPI_ID') setShowUpiIdModal(true);
                                         }}
@@ -802,7 +768,7 @@ export default function CheckoutPage() {
                                         className="bg-white p-2 rounded-lg shadow-md border border-gray-200 cursor-pointer"
                                         onClick={(e) => {
                                             e.stopPropagation();
-                                            setShowUpiQrModal(true); // Open QR modal on click
+                                            setShowUpiQrModal(true);
                                         }}
                                      >
                                         <QrCode className="w-6 h-6 text-black"/>
@@ -810,7 +776,6 @@ export default function CheckoutPage() {
                                 )}
                             </label>
                             
-                            {/* Simple Description for COD/QR */}
                             {isSelected && option.id === 'COD' && (
                                 <div className="p-4 pt-0">
                                     <Alert>
@@ -844,72 +809,43 @@ export default function CheckoutPage() {
       <main className="max-w-[1440px] mx-auto px-6 py-10">
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
           
-          {/* Left Column: TOGGLE TABS AND CONTENT */}
           <div className="lg:col-span-2 space-y-6">
-            
-            {/* TAB BUTTONS */}
             <div className="flex gap-4 border-b border-gray-200 text-lg font-semibold mb-6">
-                <button
-                    onClick={() => setActiveTab('shipping')}
-                    className={`pb-3 transition-colors ${activeTab === 'shipping' ? 'border-b-2 border-black text-black' : 'text-gray-500 hover:text-black'}`}
-                >
-                    Shipping Information
-                </button>
-                <button
-                    onClick={() => setActiveTab('payment')}
-                    disabled={!isShippingComplete}
-                    className={`pb-3 transition-colors ${!isShippingComplete ? 'opacity50 cursor-not-allowed' : (activeTab === 'payment' ? 'border-b-2 border-black text-black' : 'text-gray-500 hover:text-black')}`}
-                >
-                    Payment
-                </button>
+                <button onClick={() => setActiveTab('shipping')} className={`pb-3 transition-colors ${activeTab === 'shipping' ? 'border-b-2 border-black text-black' : 'text-gray-500 hover:text-black'}`}>Shipping Information</button>
+                <button onClick={() => setActiveTab('payment')} disabled={!isShippingComplete} className={`pb-3 transition-colors ${!isShippingComplete ? 'opacity-50 cursor-not-allowed' : (activeTab === 'payment' ? 'border-b-2 border-black text-black' : 'text-gray-500 hover:text-black')}`}>Payment</button>
             </div>
 
             {(cartError || submissionError) && (
-              <Alert variant="destructive" className="mb-4">
-                <AlertTriangle className="h-4 w-4" />
-                <AlertTitle>Checkout Error</AlertTitle>
-                <AlertDescription>{cartError || submissionError}</AlertDescription>
-              </Alert>
+              <Alert variant="destructive" className="mb-4"><AlertTitle>Checkout Error</AlertTitle><AlertDescription>{cartError || submissionError}</AlertDescription></Alert>
             )}
 
-            {/* SINGLE CARD TO HOLD THE TOGGLED CONTENT */}
             <Card className="shadow-lg min-h-[400px]">
-                {/* 1. SHIPPING TAB CONTENT */}
                 {(activeTab === 'shipping' && !isShippingComplete) && (
                     <>
                         <CardHeader className="pb-0">
                             <CardTitle className="text-2xl flex items-center justify-between">
                                 <span>Shipping Information</span>
-                                {isShippingComplete && <Check className="h-6 w-6 text-green-600" />}
                             </CardTitle>
                         </CardHeader>
                         <CardContent className="p-0">
                             <CheckoutAddressForm 
                                 initialData={checkoutInfo} 
-                                onDataChange={handleInfoChange}
-                                onContinue={handleShippingContinue}
+                                onContactChange={handleContactInfoChange} // Passed down
+                                onContinue={handleShippingContinue} 
                             />
                         </CardContent>
                     </>
                 )}
                 
-                {/* 1b. SHIPPING SUMMARY (View Mode) */}
                 {(activeTab === 'shipping' && isShippingComplete) && (
                      <>
                         <CardHeader className="pb-0">
-                            <CardTitle className="text-2xl flex items-center justify-between">
-                                <span>Shipping Information</span>
-                                {isShippingComplete && <Check className="h-6 w-6 text-green-600" />}
-                            </CardTitle>
+                            <CardTitle className="text-2xl flex items-center justify-between"><span>Shipping Information</span><Check className="h-6 w-6 text-green-600" /></CardTitle>
                         </CardHeader>
-                        <CardContent className="p-0">
-                            <ShippingSummary />
-                        </CardContent>
+                        <CardContent className="p-0"><ShippingSummary /></CardContent>
                     </>
                 )}
 
-
-                {/* 2. PAYMENT TAB CONTENT */}
                 {activeTab === 'payment' && (
                     <>
                         <CardHeader>
@@ -930,15 +866,12 @@ export default function CheckoutPage() {
             </Card>
           </div>
           
-          {/* Right Column: ORDER SUMMARY (REMAINS STICKY) */}
           <div className="lg:col-span-1">
             <div className="lg:sticky lg:top-20 space-y-6 max-h-[calc(100vh - 100px)] overflow-y-auto">
               <Card className="shadow-lg">
                   <CardHeader>
                       <CardTitle className="text-xl">Delivery Location</CardTitle>
-                      <CardDescription>
-                          {customerLocation?.city || 'No Location Set'}
-                      </CardDescription>
+                      <CardDescription>{customerLocation?.city || 'No Location Set'}</CardDescription>
                   </CardHeader>
                   <CardContent className="space-y-2">
                       <p className="text-sm text-gray-600 font-medium flex items-center">
@@ -956,367 +889,35 @@ export default function CheckoutPage() {
                   </CardContent>
               </Card>
 
-              <CheckoutOrderSummary orderData={{ 
-                  itemsWithDetails, 
-                  totalSubtotalBeforeDiscount, 
-                  totalDiscountAmount, 
-                  totalFee, 
-                  grandTotal
-              }} />
+              <CheckoutOrderSummary orderData={{ itemsWithDetails, totalSubtotalBeforeDiscount, totalDiscountAmount, totalFee, grandTotal }} />
             </div>
           </div>
         </div>
       </main>
-
-      {/* --- Modals for Forms and OTP --- */}
-
-      {user && (
-        <CustomerAddressModal 
-          isOpen={isAddressModalOpen} 
-          onClose={() => setIsAddressModalOpen(false)}
-          addresses={user.addresses || []}
-          onSelect={handleAddressSelect} 
-          onAddressAdded={handleAddressAdded} 
-        />
-      )}
       
-      <ManualLocationModal 
-        isOpen={showManualModal} 
-        onClose={() => setShowManualModal(false)}
-        onLocationSet={handleManualLocationSet} 
-      />
+      {user && <CustomerAddressModal isOpen={isAddressModalOpen} onClose={() => setIsAddressModalOpen(false)} addresses={user.addresses || []} onSelect={handleAddressSelect} onAddressAdded={handleAddressAdded} />}
+      <ManualLocationModal isOpen={showManualModal} onClose={() => setShowManualModal(false)} onLocationSet={handleManualLocationSet} />
       
-      {/* Browser Back Warning Modal (Unchanged) */}
+      {/* Modals */}
       <Dialog open={showBrowserBackWarning} onOpenChange={setShowBrowserBackWarning}>
         <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>Leave Checkout?</DialogTitle>
-            <DialogDescription>
-              Are you sure you want to leave the checkout page? Your progress may be lost.
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setShowBrowserBackWarning(false)}>
-              Stay on Page
-            </Button>
-            <Button onClick={handleConfirmBrowserBack} variant="destructive">
-              Yes, Exit
-            </Button>
-          </DialogFooter>
+          <DialogHeader><DialogTitle>Leave Checkout?</DialogTitle><DialogDescription>Are you sure you want to leave the checkout page? Your progress may be lost.</DialogDescription></DialogHeader>
+          <DialogFooter><Button variant="outline" onClick={() => setShowBrowserBackWarning(false)}>Stay on Page</Button><Button onClick={handleConfirmBrowserBack} variant="destructive">Yes, Exit</Button></DialogFooter>
         </DialogContent>
       </Dialog>
       
-      {/* Mock OTP Modal (New) */}
-      <MockOtpModal 
-        isOtpModalOpen={isOtpModalOpen}
-        handlePaymentFailure={handlePaymentFailure}
-        otpTimer={otpTimer}
-        mockOtp={mockOtp}
-        otpInput={otpInput}
-        setOtpInput={setOtpInput}
-        handleOtpSubmit={handleOtpSubmit}
-        loading={loading}
-        submissionError={submissionError}
-        finalPaymentMethod={finalPaymentMethod || ''} // SAFE ACCESS
-        userEmail={checkoutInfo.email} 
-      />
+      <MockOtpModal isOtpModalOpen={isOtpModalOpen} handlePaymentFailure={handlePaymentFailure} otpTimer={otpTimer} mockOtp={mockOtp} otpInput={otpInput} setOtpInput={setOtpInput} handleOtpSubmit={handleOtpSubmit} loading={loading} submissionError={submissionError} finalPaymentMethod={finalPaymentMethod || ''} userEmail={checkoutInfo.email} />
 
-      {/* UPI QR Modal (New) */}
-      <UpiQrModal 
-        isOpen={showUpiQrModal}
-        onClose={() => handlePaymentFailure("UPI QR payment was cancelled or interrupted.")} 
-        onPaymentSuccess={handleUpiQrSuccess}
-        grandTotal={grandTotal}
-      />
+      <UpiQrModal isOpen={showUpiQrModal} onClose={() => handlePaymentFailure("UPI QR payment was cancelled or interrupted.")} onPaymentSuccess={handleUpiQrSuccess} grandTotal={grandTotal} />
 
-      {/* --- Card Input Modal (Now confirms and proceeds to OTP) --- */}
-      <CardInputModal
-        isOpen={showCardModal}
-        onClose={() => setShowCardModal(false)}
-        cardDetails={cardDetails}
-        setCardDetails={setCardDetails}
-        onConfirm={() => {
-            setShowCardModal(false);
-            // Trigger OTP flow immediately after successful confirmation
-            const mock = generateMockOtp();
-            setMockOtp(mock);
-            setOtpInput('');
-            setOtpTimer(30);
-            setFinalPaymentMethod('Card');
-            setIsOtpModalOpen(true);
-        }}
-        onCancel={() => setShowCardModal(false)}
-      />
+      <CardInputModal isOpen={showCardModal} onClose={() => setShowCardModal(false)} cardDetails={cardDetails} setCardDetails={setCardDetails} onConfirm={() => { setShowCardModal(false); const mock = generateMockOtp(); setMockOtp(mock); setOtpInput(''); setOtpTimer(30); setFinalPaymentMethod('Card'); setIsOtpModalOpen(true); }} onCancel={() => setShowCardModal(false)} />
 
-      {/* --- UPI ID Input Modal (Now confirms and proceeds to OTP) --- */}
-      <UpiIdInputModal
-        isOpen={showUpiIdModal}
-        onClose={() => setShowUpiIdModal(false)}
-        upiId={upiId}
-        setUpiId={setUpiId}
-        onConfirm={() => {
-            setShowUpiIdModal(false);
-            // Trigger OTP flow immediately after successful confirmation
-            const mock = generateMockOtp();
-            setMockOtp(mock);
-            setOtpInput('');
-            setOtpTimer(30);
-            setFinalPaymentMethod(`UPI (ID: ${upiId})`);
-            setIsOtpModalOpen(true);
-        }}
-        onCancel={() => setShowUpiIdModal(false)}
-      />
+      <UpiIdInputModal isOpen={showUpiIdModal} onClose={() => setShowUpiIdModal(false)} upiId={upiId} setUpiId={setUpiId} onConfirm={() => { setShowUpiIdModal(false); const mock = generateMockOtp(); setMockOtp(mock); setOtpInput(''); setOtpTimer(30); setFinalPaymentMethod(`UPI (ID: ${upiId})`); setIsOtpModalOpen(true); }} onCancel={() => setShowUpiIdModal(false)} />
     </div>
   );
 }
 
-// -----------------------------------------------------------------
-// SHARED COMPONENTS (Defined outside CheckoutPage)
-// -----------------------------------------------------------------
-
-// --- UPI QR CODE MODAL ---
-function UpiQrModal({ isOpen, onClose, onPaymentSuccess, grandTotal }) {
-    const mockUpiId = "livemart@upi";
-    const amount = (grandTotal / 100).toFixed(2); // Convert to rupees/2 decimals for UPI intent
-    
-    // Generate UPI Deep Link / QR Code Data
-    const upiLink = `upi://pay?pa=${mockUpiId}&pn=LiveMart&am=${amount}&cu=INR`;
-    const qrCodeUrl = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(upiLink)}`;
-    
-    return (
-        <Dialog open={isOpen} onOpenChange={onClose}>
-            <DialogContent className="sm:max-w-sm">
-                <DialogHeader className="text-center">
-                    <DialogTitle className="text-xl">Scan to Pay ({formatPrice(grandTotal)})</DialogTitle>
-                    <DialogDescription>
-                        Scan the QR code with any UPI app (GPay, PhonePe, Paytm).
-                    </DialogDescription>
-                </DialogHeader>
-                <div className="space-y-4 py-4 text-center">
-                    
-                    <div className="flex justify-center p-2 border border-gray-300 rounded-lg bg-white shadow-inner">
-                        <img src={qrCodeUrl} alt="UPI QR Code" className="w-48 h-48" />
-                    </div>
-                    
-                    <p className="text-2xl font-bold text-black">{formatPrice(grandTotal)}</p>
-                    <p className="text-sm text-muted-foreground">Paying to: {mockUpiId}</p>
-
-                </div>
-                <DialogFooter className="flex-col sm:flex-col gap-2">
-                    <Button 
-                        onClick={onPaymentSuccess} 
-                        className="w-full bg-green-600 hover:bg-green-700"
-                    >
-                        <Check className="w-4 h-4 mr-2"/> Simulate Payment Success
-                    </Button>
-                    <Button 
-                        type="button" 
-                        variant="outline" 
-                        onClick={() => onClose(false)} // Explicitly close and trigger failure check
-                        className="w-full"
-                    >
-                        Cancel Payment
-                    </Button>
-                </DialogFooter>
-            </DialogContent>
-        </Dialog>
-    );
-}
-
-// --- CARD INPUT MODAL ---
-function CardInputModal({ isOpen, onClose, cardDetails, setCardDetails, onConfirm, onCancel }) {
-    const [localCardDetails, setLocalCardDetails] = useState(cardDetails);
-    const [localError, setLocalError] = useState(null);
-
-    useEffect(() => {
-        if (isOpen) {
-            setLocalCardDetails(cardDetails);
-            setLocalError(null);
-        }
-    }, [isOpen, cardDetails]);
-    
-    // 1. Card Number Handler (Digits only, max 16)
-    const handleNumberChange = (e) => {
-        const cleaned = e.target.value.replace(/\D/g, '').slice(0, 16);
-        setLocalCardDetails(prev => ({ ...prev, number: cleaned }));
-        setLocalError(null);
-    };
-
-    // 2. Expiry (MM/YY) Handler (Auto-insert '/')
-    const handleExpiryChange = (e) => {
-        let value = e.target.value.replace(/\D/g, '');
-        if (value.length > 2) {
-            value = value.slice(0, 2) + '/' + value.slice(2, 4);
-        } else if (value.length === 2 && localCardDetails.expiry.length < 2) {
-             // Handle case where user types MM quickly, insert /
-             value = value + '/';
-        }
-        setLocalCardDetails(prev => ({ ...prev, expiry: value.slice(0, 5) }));
-        setLocalError(null);
-    };
-
-    // 3. CVV Handler (Digits only, max 3)
-    const handleCvvChange = (e) => {
-        const cleaned = e.target.value.replace(/\D/g, '').slice(0, 3);
-        setLocalCardDetails(prev => ({ ...prev, cvv: cleaned }));
-        setLocalError(null);
-    };
-    
-    // 4. Cardholder Name Handler (Alphabets/Space only, CAPS enforced)
-    const handleNameChange = (e) => {
-        const cleaned = e.target.value.toUpperCase().replace(/[^A-Z\s]/g, '');
-        setLocalCardDetails(prev => ({ ...prev, name: cleaned }));
-        setLocalError(null);
-    };
-
-    const handleSave = (e) => {
-        e.preventDefault();
-        const validationError = validateCard(localCardDetails);
-        if (validationError) {
-            setLocalError(validationError);
-            return;
-        }
-
-        setCardDetails(localCardDetails); // Save valid data back to parent
-        onConfirm(); // Proceed to OTP
-    };
-
-    return (
-        <Dialog open={isOpen} onOpenChange={onCancel}>
-            <DialogContent className="sm:max-w-md">
-                <DialogHeader>
-                    <DialogTitle>Enter Card Details</DialogTitle>
-                    <DialogDescription>
-                        Securely enter your debit or credit card information.
-                    </DialogDescription>
-                </DialogHeader>
-                <form onSubmit={handleSave} className="space-y-4 py-4">
-                     <Input 
-                        placeholder="Card Number (16 Digits)" 
-                        value={formatCardNumberDisplay(localCardDetails.number)} 
-                        onChange={handleNumberChange} 
-                        maxLength={19}
-                        required
-                        type="text"
-                    />
-                    <div className="grid grid-cols-2 gap-4">
-                        <Input 
-                            placeholder="MM/YY" 
-                            value={localCardDetails.expiry} 
-                            onChange={handleExpiryChange} 
-                            maxLength={5}
-                            required
-                            type="text"
-                        />
-                        <Input 
-                            placeholder="CVV" 
-                            value={localCardDetails.cvv} 
-                            onChange={handleCvvChange} 
-                            maxLength={3}
-                            required
-                            type="password" // Use password type for security (CVV)
-                        />
-                    </div>
-                    <Input 
-                        placeholder="Cardholder Name (A-Z only)" 
-                        value={localCardDetails.name} 
-                        onChange={handleNameChange} 
-                        type="text" 
-                        required
-                    />
-
-                    {localError && (
-                        <Alert variant="destructive">
-                            <AlertDescription className="text-xs">
-                                {localError}
-                            </AlertDescription>
-                        </Alert>
-                    )}
-
-                    <DialogFooter>
-                        <Button type="button" variant="outline" onClick={onCancel}>Cancel</Button>
-                        <Button type="submit" className="bg-black hover:bg-gray-800">
-                            <Check className="w-4 h-4 mr-1"/> Confirm
-                        </Button>
-                    </DialogFooter>
-                </form>
-            </DialogContent>
-        </Dialog>
-    );
-}
-
-// --- UPI ID INPUT MODAL ---
-function UpiIdInputModal({ isOpen, onClose, upiId, setUpiId, onConfirm, onCancel }) {
-    const [localUpiId, setLocalUpiId] = useState(upiId);
-    const [localError, setLocalError] = useState(null);
-
-    // Handler to filter input as user types
-    const handleUpiInputChange = (e) => {
-        // Allow alphanumeric, @, and .
-        const filteredValue = e.target.value.replace(/[^a-zA-Z0-9@.]/g, '');
-        setLocalUpiId(filteredValue);
-        setLocalError(null);
-    };
-
-    useEffect(() => {
-        if (isOpen) {
-            setLocalUpiId(upiId);
-            setLocalError(null);
-        }
-    }, [isOpen, upiId]);
-    
-    const handleSave = (e) => {
-        e.preventDefault();
-        const validationError = validateUpiId(localUpiId);
-        if (validationError) {
-            setLocalError(validationError);
-            return;
-        }
-
-        setUpiId(localUpiId); // Save valid data back to parent
-        onConfirm(); // Proceed to OTP
-    };
-
-    return (
-        <Dialog open={isOpen} onOpenChange={onCancel}>
-            <DialogContent className="sm:max-w-md">
-                <DialogHeader>
-                    <DialogTitle>Enter UPI ID</DialogTitle>
-                    <DialogDescription>
-                        Enter your virtual payment address (VPA) for payment via UPI.
-                    </DialogDescription>
-                </DialogHeader>
-                <form onSubmit={handleSave} className="space-y-4 py-4">
-                    <Input 
-                        placeholder="yourupiid@bank" 
-                        value={localUpiId} 
-                        onChange={handleUpiInputChange} 
-                        required
-                        type="text"
-                    />
-                    
-                    {localError && (
-                        <Alert variant="destructive">
-                            <AlertDescription className="text-xs">
-                                {localError}
-                            </AlertDescription>
-                        </Alert>
-                    )}
-
-                    <DialogFooter>
-                        <Button type="button" variant="outline" onClick={onCancel}>Cancel</Button>
-                        <Button type="submit" className="bg-black hover:bg-gray-800">
-                            <Check className="w-4 h-4 mr-1"/> Confirm
-                        </Button>
-                    </DialogFooter>
-                </form>
-            </DialogContent>
-        </Dialog>
-    );
-}
-
-
-// --- FINAL ORDER SUCCESS SCREEN COMPONENT (Full Page) ---
+// ... [FinalOrderSuccessScreen, MockOtpModal, UpiQrModal, CardInputModal, UpiIdInputModal components remain identical to previous step]
 const FinalOrderSuccessScreen = ({ orderId }) => {
     const router = useRouter();
     return (
@@ -1348,9 +949,7 @@ const FinalOrderSuccessScreen = ({ orderId }) => {
     );
 };
 
-// --- MOCK OTP MODAL COMPONENT (FIXED) ---
 const MockOtpModal = ({ isOtpModalOpen, handlePaymentFailure, otpTimer, mockOtp, otpInput, setOtpInput, handleOtpSubmit, loading, submissionError, finalPaymentMethod, userEmail }) => {
-    // Safely determine contact method
     const paymentMethod = finalPaymentMethod || '';
     const contactMethod = paymentMethod === 'Card' || paymentMethod.startsWith('UPI') ? 
                           (userEmail || "your registered email/phone") : "your device";
@@ -1368,48 +967,120 @@ const MockOtpModal = ({ isOtpModalOpen, handlePaymentFailure, otpTimer, mockOtp,
                 </DialogDescription>
               </DialogHeader>
               <div className="py-4 space-y-4 text-center">
-                
-                {/* Timer */}
                 <div className="flex items-center justify-center text-red-600 font-bold text-3xl">
                     <Timer className="h-6 w-6 mr-2 animate-pulse" /> {otpTimer}s
                 </div>
-                
-                {/* Mock OTP Display (For dev testing) */}
-                <Alert variant="destructive">
-                    <AlertDescription className="text-sm">
-                        {/* Expose OTP for testing purposes */}
-                        <strong>[DEV MODE] Enter this OTP: {mockOtp}</strong>
-                    </AlertDescription>
-                </Alert>
-
-                {/* Input */}
+                <Alert variant="destructive"><AlertDescription className="text-sm"><strong>[DEV MODE] Enter this OTP: {mockOtp}</strong></AlertDescription></Alert>
                 <div className="space-y-2">
                     <Label htmlFor="otp">Enter 6-Digit OTP</Label>
-                    <Input 
-                        id="otp"
-                        type="text" 
-                        maxLength={6}
-                        value={otpInput} 
-                        onChange={(e) => setOtpInput(e.target.value.replace(/\D/g, '').slice(0, 6))}
-                        placeholder="••••••"
-                        className="text-center text-2xl font-mono tracking-widest"
-                    />
+                    <Input id="otp" type="text" maxLength={6} value={otpInput} onChange={(e) => setOtpInput(e.target.value.replace(/\D/g, '').slice(0, 6))} placeholder="••••••" className="text-center text-2xl font-mono tracking-widest"/>
                     {submissionError && <p className="text-red-500 text-sm mt-2">{submissionError}</p>}
                 </div>
-
-                <div className="text-sm text-gray-500">
-                    You have {otpTimer} seconds remaining.
-                </div>
+                <div className="text-sm text-gray-500">You have {otpTimer} seconds remaining.</div>
               </div> 
               <DialogFooter>
-                <Button variant="outline" onClick={() => handlePaymentFailure("Payment cancelled by user.")}>
-                  Cancel Payment
-                </Button>
-                <Button onClick={handleOtpSubmit} disabled={otpInput.length !== 6 || loading}>
-                  Verify & Pay
-                </Button>
+                <Button variant="outline" onClick={() => handlePaymentFailure("Payment cancelled by user.")}>Cancel Payment</Button>
+                <Button onClick={handleOtpSubmit} disabled={otpInput.length !== 6 || loading}>Verify & Pay</Button>
               </DialogFooter>
             </DialogContent>
           </Dialog>
     );
 };
+
+function UpiQrModal({ isOpen, onClose, onPaymentSuccess, grandTotal }) {
+    const mockUpiId = "livemart@upi";
+    const amount = (grandTotal / 100).toFixed(2); 
+    const upiLink = `upi://pay?pa=${mockUpiId}&pn=LiveMart&am=${amount}&cu=INR`;
+    const qrCodeUrl = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(upiLink)}`;
+    
+    return (
+        <Dialog open={isOpen} onOpenChange={onClose}>
+            <DialogContent className="sm:max-w-sm">
+                <DialogHeader className="text-center">
+                    <DialogTitle className="text-xl">Scan to Pay ({formatPrice(grandTotal)})</DialogTitle>
+                    <DialogDescription>Scan the QR code with any UPI app (GPay, PhonePe, Paytm).</DialogDescription>
+                </DialogHeader>
+                <div className="space-y-4 py-4 text-center">
+                    <div className="flex justify-center p-2 border border-gray-300 rounded-lg bg-white shadow-inner"><img src={qrCodeUrl} alt="UPI QR Code" className="w-48 h-48" /></div>
+                    <p className="text-2xl font-bold text-black">{formatPrice(grandTotal)}</p>
+                    <p className="text-sm text-muted-foreground">Paying to: {mockUpiId}</p>
+                </div>
+                <DialogFooter className="flex-col sm:flex-col gap-2">
+                    <Button onClick={onPaymentSuccess} className="w-full bg-green-600 hover:bg-green-700"><Check className="w-4 h-4 mr-2"/> Simulate Payment Success</Button>
+                    <Button type="button" variant="outline" onClick={() => onClose(false)} className="w-full">Cancel Payment</Button>
+                </DialogFooter>
+            </DialogContent>
+        </Dialog>
+    );
+}
+
+function CardInputModal({ isOpen, onClose, cardDetails, setCardDetails, onConfirm, onCancel }) {
+    const [localCardDetails, setLocalCardDetails] = useState(cardDetails);
+    const [localError, setLocalError] = useState(null);
+
+    useEffect(() => { if (isOpen) { setLocalCardDetails(cardDetails); setLocalError(null); } }, [isOpen, cardDetails]);
+    
+    const handleNumberChange = (e) => { setLocalCardDetails(prev => ({ ...prev, number: e.target.value.replace(/\D/g, '').slice(0, 16) })); setLocalError(null); };
+    const handleExpiryChange = (e) => {
+        let value = e.target.value.replace(/\D/g, '');
+        if (value.length > 2) value = value.slice(0, 2) + '/' + value.slice(2, 4);
+        else if (value.length === 2 && localCardDetails.expiry.length < 2) value = value + '/';
+        setLocalCardDetails(prev => ({ ...prev, expiry: value.slice(0, 5) })); setLocalError(null);
+    };
+    const handleCvvChange = (e) => { setLocalCardDetails(prev => ({ ...prev, cvv: e.target.value.replace(/\D/g, '').slice(0, 3) })); setLocalError(null); };
+    const handleNameChange = (e) => { setLocalCardDetails(prev => ({ ...prev, name: e.target.value.toUpperCase().replace(/[^A-Z\s]/g, '') })); setLocalError(null); };
+
+    const handleSave = (e) => {
+        e.preventDefault();
+        const validationError = validateCard(localCardDetails);
+        if (validationError) { setLocalError(validationError); return; }
+        setCardDetails(localCardDetails); onConfirm();
+    };
+
+    return (
+        <Dialog open={isOpen} onOpenChange={onCancel}>
+            <DialogContent className="sm:max-w-md">
+                <DialogHeader><DialogTitle>Enter Card Details</DialogTitle><DialogDescription>Securely enter your debit or credit card information.</DialogDescription></DialogHeader>
+                <form onSubmit={handleSave} className="space-y-4 py-4">
+                     <Input placeholder="Card Number (16 Digits)" value={formatCardNumberDisplay(localCardDetails.number)} onChange={handleNumberChange} maxLength={19} required type="text"/>
+                    <div className="grid grid-cols-2 gap-4">
+                        <Input placeholder="MM/YY" value={localCardDetails.expiry} onChange={handleExpiryChange} maxLength={5} required type="text"/>
+                        <Input placeholder="CVV" value={localCardDetails.cvv} onChange={handleCvvChange} maxLength={3} required type="password" />
+                    </div>
+                    <Input placeholder="Cardholder Name (A-Z only)" value={localCardDetails.name} onChange={handleNameChange} type="text" required/>
+                    {localError && <Alert variant="destructive"><AlertDescription className="text-xs">{localError}</AlertDescription></Alert>}
+                    <DialogFooter><Button type="button" variant="outline" onClick={onCancel}>Cancel</Button><Button type="submit" className="bg-black hover:bg-gray-800"><Check className="w-4 h-4 mr-1"/> Confirm</Button></DialogFooter>
+                </form>
+            </DialogContent>
+        </Dialog>
+    );
+}
+
+function UpiIdInputModal({ isOpen, onClose, upiId, setUpiId, onConfirm, onCancel }) {
+    const [localUpiId, setLocalUpiId] = useState(upiId);
+    const [localError, setLocalError] = useState(null);
+
+    const handleUpiInputChange = (e) => { setLocalUpiId(e.target.value.replace(/[^a-zA-Z0-9@.]/g, '')); setLocalError(null); };
+
+    useEffect(() => { if (isOpen) { setLocalUpiId(upiId); setLocalError(null); } }, [isOpen, upiId]);
+    
+    const handleSave = (e) => {
+        e.preventDefault();
+        const validationError = validateUpiId(localUpiId);
+        if (validationError) { setLocalError(validationError); return; }
+        setUpiId(localUpiId); onConfirm();
+    };
+
+    return (
+        <Dialog open={isOpen} onOpenChange={onCancel}>
+            <DialogContent className="sm:max-w-md">
+                <DialogHeader><DialogTitle>Enter UPI ID</DialogTitle><DialogDescription>Enter your virtual payment address (VPA) for payment via UPI.</DialogDescription></DialogHeader>
+                <form onSubmit={handleSave} className="space-y-4 py-4">
+                    <Input placeholder="yourupiid@bank" value={localUpiId} onChange={handleUpiInputChange} required type="text"/>
+                    {localError && <Alert variant="destructive"><AlertDescription className="text-xs">{localError}</AlertDescription></Alert>}
+                    <DialogFooter><Button type="button" variant="outline" onClick={onCancel}>Cancel</Button><Button type="submit" className="bg-black hover:bg-gray-800"><Check className="w-4 h-4 mr-1"/> Confirm</Button></DialogFooter>
+                </form>
+            </DialogContent>
+        </Dialog>
+    );
+}

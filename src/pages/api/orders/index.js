@@ -1,73 +1,107 @@
 // src/pages/api/orders/index.js
-import dbConnect from "lib/dbConnect.js";
-import OrderService from "services/orderService.js";
-import { OrderError, InsufficientStockError } from "services/orderService.js";
-import Product from "models/Product.js";
-import mongoose from "mongoose"; // Import mongoose
+import dbConnect from "../../../lib/dbConnect.js";
+import OrderService from "../../../services/orderService.js";
+import { OrderError, InsufficientStockError } from "../../../services/orderService.js";
+import Product from "../../../models/Product.js";
+import { getSessionFromReq } from "../../../lib/authHelpers.js";
 
 export default async function handler(req, res) {
   await dbConnect();
 
-  if (req.method !== "POST") {
-    res.setHeader("Allow", ["POST"]);
-    return res.status(405).json({ message: "Method not allowed" });
+  const session = await getSessionFromReq(req);
+  const userId = session?.user?._id || null;
+
+  // --- GET: LIST USER ORDERS ---
+  if (req.method === "GET") {
+    if (!userId) {
+      return res.status(401).json({ error: "Not authenticated" });
+    }
+
+    try {
+      const { page = 1, limit = 20 } = req.query;
+      const result = await OrderService.listOrders({ 
+        userId: userId, 
+        page, 
+        limit 
+      });
+      return res.json(result);
+    } catch (e) {
+      console.error("Error fetching orders:", e);
+      return res.status(500).json({ error: "Failed to fetch orders" });
+    }
   }
 
-  const payload = req.body;
-  if (!payload || !payload.customer || !Array.isArray(payload.items) || payload.items.length === 0) {
-    return res.status(400).json({ error: "Invalid order payload: customer and items are required." });
+  // --- POST: CREATE ORDER ---
+  if (req.method === "POST") {
+    // 1. SECURITY CHECK: Enforce Login
+    // This prevents "userId: null" (orphan) orders.
+    if (!userId) {
+        return res.status(401).json({ 
+            error: "Authentication required.", 
+            message: "You must be logged in to place an order." 
+        });
+    }
+
+    const payload = req.body;
+    if (!payload || !payload.customer || !Array.isArray(payload.items) || payload.items.length === 0) {
+      return res.status(400).json({ error: "Invalid order payload: customer and items are required." });
+    }
+
+    try {
+      const productIds = payload.items.map(i => i.productId);
+      const products = await Product.find({ _id: { $in: productIds } }).select("ownerId name").lean();
+      
+      const productMap = {};
+      products.forEach(p => { productMap[String(p._id)] = p; });
+
+      const ordersBySeller = {};
+
+      for (const item of payload.items) {
+          const product = productMap[String(item.productId)];
+          if (!product) {
+              throw new OrderError(`Product not found: ${item.name}`);
+          }
+          
+          const sellerId = String(product.ownerId);
+          
+          if (!ordersBySeller[sellerId]) {
+              ordersBySeller[sellerId] = [];
+          }
+          ordersBySeller[sellerId].push(item);
+      }
+
+      const createdOrders = [];
+      
+      for (const [sellerId, items] of Object.entries(ordersBySeller)) {
+          const orderDoc = await OrderService.createOrder(
+              payload.customer,
+              items,
+              sellerId,
+              userId // Now guaranteed to be present
+          );
+          createdOrders.push(orderDoc);
+      }
+
+      return res.status(201).json({ 
+          ok: true, 
+          orders: createdOrders,
+          message: `Successfully created ${createdOrders.length} order(s).`
+      });
+
+    } catch (err) {
+      console.error("Failed to create order:", err);
+
+      if (err instanceof InsufficientStockError) {
+        return res.status(409).json({ error: "Insufficient stock", message: err.message });
+      }
+      if (err instanceof OrderError) {
+        return res.status(400).json({ error: "Invalid order", message: err.message });
+      }
+      
+      return res.status(500).json({ error: "Failed to place order", message: err.message });
+    }
   }
 
-  let session = null; // We'll declare session here, though OrderService handles its own
-  try {
-    // --- THIS IS THE NEW, CORRECTED LOGIC ---
-
-    // 1. Find the sellerId for this order.
-    // We will assume all items in a single order come from the same seller.
-    const firstProductId = payload.items[0].productId;
-    if (!firstProductId) {
-      return res.status(400).json({ error: "Invalid cart items." });
-    }
-
-    const firstProduct = await Product.findById(firstProductId).select("ownerId").lean();
-    if (!firstProduct || !firstProduct.ownerId) {
-      return res.status(400).json({ error: "Could not find product owner (seller)." });
-    }
-    
-    // The 'ownerId' of the product is the 'sellerId' for the order
-    const sellerId = firstProduct.ownerId; 
-
-    // 2. Call the powerful OrderService to create the order.
-    //    It will handle the database transaction and stock decrement automatically.
-    //    We pass the customer, items, and the sellerId we just found.
-    const orderDoc = await OrderService.createOrder(
-      payload.customer,
-      payload.items,
-      sellerId // This is the new required field
-    );
-
-    // 3. Success!
-    //    Note: The old API returned { orderId: ... }, the new one returns the full order doc.
-    //    Your frontend (checkout.js) will handle this fine.
-    return res.status(201).json(orderDoc); // Return the full order object
-
-  } catch (err) {
-    console.error("Failed to create order:", err);
-
-    // Handle specific errors from our OrderService
-    if (err instanceof InsufficientStockError) {
-      return res.status(409).json({ error: "Insufficient stock", message: err.message });
-    }
-    if (err instanceof OrderError) {
-      return res.status(400).json({ error: "Invalid order", message: err.message });
-    }
-    
-    // Handle the old transaction failure (just in case)
-    if (err.message.includes("Transaction failed")) {
-       return res.status(500).json({ error: "Order failed, please try again." });
-    }
-
-    // Generic fallback
-    return res.status(500).json({ error: "Failed to place order", message: err.message });
-  }
+  res.setHeader("Allow", ["GET", "POST"]);
+  return res.status(405).json({ message: "Method not allowed" });
 }
