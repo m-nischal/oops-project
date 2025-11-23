@@ -6,6 +6,74 @@ import ProductCard from "@/components/ProductCard";
 import { Button } from "@/components/ui/button";
 import { Loader2, Package, Search } from "lucide-react";
 
+// Helper to filter out purchased product IDs from results
+function filterPurchased(products, purchasedIds) {
+  const purchasedSet = new Set(purchasedIds.map(String));
+  return products.filter(p => !purchasedSet.has(String(p._id)));
+}
+
+// Function to find common tags and prioritize the search
+async function getRecommendedProductsByTags(token, purchasedTags, purchasedProductIds, maxResults = 4) {
+    if (purchasedTags.length === 0) return [];
+    
+    // 1. Count tag frequency
+    const tagCounts = purchasedTags.reduce((acc, tag) => {
+        acc[tag] = (acc[tag] || 0) + 1;
+        return acc;
+    }, {});
+    
+    // 2. Sort tags by frequency (most frequent first)
+    const sortedTags = Object.entries(tagCounts)
+        .sort(([, countA], [, countB]) => countB - countA)
+        .map(([tag]) => tag);
+    
+    // 3. Construct query filter to search for products matching ANY of the top 5 tags
+    const topTags = sortedTags.slice(0, 5).join(',');
+
+    try {
+        // We use the 'similar' API endpoint to query by multiple tags
+        const res = await fetch(`/api/products/similar?tags=${topTags}&limit=20`, {
+            headers: { 'Authorization': `Bearer ${token}` },
+        });
+
+        // --- FIX: Improved Error Handling to read server response ---
+        if (!res.ok) {
+            const errorText = await res.text();
+            let errorMessage = `Failed to fetch similar products (HTTP ${res.status}).`;
+            try {
+                 // Try to parse the error message as JSON
+                 const errorJson = JSON.parse(errorText);
+                 errorMessage = errorJson.error || errorJson.message || errorMessage;
+            } catch (e) {
+                 // Fallback to plain text if not JSON
+                 errorMessage = `Failed to fetch similar products (HTTP ${res.status}). Server returned: ${errorText.substring(0, 100)}`;
+            }
+            throw new Error(errorMessage);
+        }
+        // -----------------------------------------------------------
+        
+        const data = await res.json();
+        
+        const products = data.items || [];
+
+        // 4. Filter out items the user has already purchased
+        let filtered = filterPurchased(products, purchasedProductIds);
+
+        // 5. Secondary sort by highest tag match count (in-memory)
+        filtered.forEach(p => {
+            p.tagMatchCount = p.tags ? p.tags.filter(tag => sortedTags.includes(tag)).length : 0;
+        });
+        filtered.sort((a, b) => b.tagMatchCount - a.tagMatchCount);
+
+        return filtered.slice(0, maxResults);
+
+    } catch (e) {
+        console.error("Error fetching tag-based recommendations:", e);
+        throw e;
+    }
+}
+
+
 export default function Recommendations() {
   const router = useRouter();
   const [recommendations, setRecommendations] = useState([]);
@@ -26,13 +94,13 @@ export default function Recommendations() {
     setIsAuthenticated(true);
     
     try {
-      // 1. Fetch Order History (B2C Orders)
-      const ordersRes = await fetch("/api/orders?limit=10", {
+      // 1. Fetch ALL Orders (user's purchases)
+      const ordersRes = await fetch("/api/orders?limit=100", { // Increased limit to gather more history
         headers: { 'Authorization': `Bearer ${token}` },
       });
       
       if (ordersRes.status === 401) {
-        setIsAuthenticated(false); // Token invalid or expired
+        setIsAuthenticated(false);
         setLoading(false);
         return;
       }
@@ -46,28 +114,44 @@ export default function Recommendations() {
         return;
       }
 
-      // 2. Extract unique product IDs from recent orders (simulation of history/preference)
-      const uniqueProductIds = new Set();
+      // 2. Extract unique product IDs and all tags from purchased items
+      const purchasedProductIds = [];
+      const purchasedTags = [];
       orders.forEach(order => {
-        order.items.forEach(item => uniqueProductIds.add(item.productId));
+        order.items.forEach(item => {
+            purchasedProductIds.push(item.productId);
+        });
       });
       
-      // 3. Fetch full product details for a maximum of 4 recommended items
-      const productPromises = Array.from(uniqueProductIds).slice(0, 4).map(id => 
-        fetch(`/api/products/${id}`).then(r => r.ok ? r.json() : null)
+      // 3. Fetch tags for all unique purchased products
+      const uniquePurchasedIds = [...new Set(purchasedProductIds)];
+      
+      const tagPromises = uniquePurchasedIds.map(id => 
+          fetch(`/api/products/${id}`).then(r => r.ok ? r.json() : null)
       );
+      
+      const tagResults = await Promise.all(tagPromises);
+      
+      tagResults.forEach(r => {
+          if (r && r.product && Array.isArray(r.product.tags)) {
+              r.product.tags.forEach(tag => purchasedTags.push(tag));
+          }
+      });
 
-      const productResults = await Promise.all(productPromises);
+      // 4. Find new products based on the aggregated tags
+      const recommendationsList = await getRecommendedProductsByTags(
+          token, 
+          purchasedTags, 
+          uniquePurchasedIds, 
+          4
+      );
       
-      const products = productResults
-        .filter(r => r && r.product)
-        .map(r => r.product);
-      
-      setRecommendations(products);
+      setRecommendations(recommendationsList);
 
     } catch (err) {
       console.error("Failed to fetch recommendations:", err);
-      setError("Failed to load personalized recommendations.");
+      // Use the error message from the inner function call
+      setError(err.message); 
     } finally {
       setLoading(false);
     }

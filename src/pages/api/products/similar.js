@@ -3,6 +3,7 @@ import dbConnect from "../../../lib/dbConnect";
 import Product from "../../../models/Product";
 import CatalogService from "../../../services/catalogService";
 import mongoose from "mongoose";
+import User from "../../../models/User"; // FIX: ADDED MISSING IMPORT
 
 export default async function handler(req, res) {
   await dbConnect();
@@ -12,11 +13,13 @@ export default async function handler(req, res) {
   }
 
   const { productId, tags = "" } = req.query;
-  const tagList = Array.isArray(tags) ? tags : String(tags).split(',').filter(t => t.trim().length > 0);
+  // Ensure tags is an array of strings, handling comma-separated input
+  const tagList = Array.isArray(tags) 
+    ? tags 
+    : String(tags).split(',').map(t => t.trim()).filter(t => t.length > 0);
 
-  if (!productId || !mongoose.isValidObjectId(productId)) {
-      return res.status(400).json({ error: "Valid productId is required." });
-  }
+  // productId is optional for recommendation systems but helpful for exclusion
+  const validProductId = productId && mongoose.isValidObjectId(productId);
 
   if (tagList.length === 0) {
       return res.status(200).json({ items: [], message: "No tags provided to find similar products." });
@@ -24,18 +27,27 @@ export default async function handler(req, res) {
 
   try {
     const filter = {
-      _id: { $ne: productId }, // Exclude the current product
       isPublished: true,
       tags: { $in: tagList } // Find products that match any of the tags
     };
 
-    // Prioritize products that share more tags (This requires aggregation, which is complex. 
-    // We will use standard find/sort and rely on the client to get the best matches first.)
+    if (validProductId) {
+        filter._id = { $ne: productId }; // Exclude the current product if an ID is provided
+    }
     
+    // --- Exclude Wholesaler Products (Retailer products only for customer view) ---
+    const wholesalers = await User.find({ role: "WHOLESALER" }).select("_id").lean();
+    const wholesalerIds = wholesalers.map(u => u._id);
+    if (wholesalerIds.length > 0) {
+        filter.ownerId = { $nin: wholesalerIds };
+    }
+    // ----------------------------------------------------------------------------
+
+
     // Using CatalogService ensures stock computation
     const products = await CatalogService.getProducts(filter, { 
       lean: true, 
-      limit: 4, // Limit to 4 for the section display
+      limit: 20, // Fetch more than needed so filtering/sorting by match score works in component
       sort: { createdAt: -1 } 
     });
 

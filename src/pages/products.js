@@ -195,7 +195,7 @@ const FilterSection = ({
   return (
     <div className={`py-5 border-b border-gray-200 last:border-0 ${className}`}>
       <div
-        className="flex justify-between items-center cursor-pointer mb-4 group"
+        className="flex justify-between items-center cursor-pointer group"
         onClick={() => setIsOpen(!isOpen)}
       >
         <h3 className="text-lg font-bold text-black group-hover:opacity-80 flex items-center">
@@ -253,6 +253,7 @@ const Breadcrumbs = ({ path }) => (
 
 export default function ProductsPage() {
   const router = useRouter();
+  // ADD 'sort' to query destructuring
   const { categoryId, q, tag, lat, lng, radius, sort } = router.query;
 
   // --- State Declarations (Moved to the top to ensure definition before use) ---
@@ -291,7 +292,7 @@ export default function ProductsPage() {
 
   useEffect(() => {
     if (!router.isReady) return;
-    // This effect is now safe because sortOption is already initialized above.
+    // --- UPDATED: Handle 'recommended' sort parameter ---
     if (sort) {
       setSortOption(sort);
     } else if (radius) {
@@ -299,6 +300,7 @@ export default function ProductsPage() {
     } else {
       setSortOption("most-popular");
     }
+    // ----------------------------------------------------
   }, [router.isReady, sort, radius]);
   
   // 2. Debounce handler for price range filtering
@@ -399,6 +401,8 @@ export default function ProductsPage() {
       setLoading(true);
       try {
         const params = new URLSearchParams();
+        const token = localStorage.getItem("token"); // Get token for recommendations
+
         if (categoryId) params.set("categoryId", categoryId);
         if (q) params.set("q", q);
         if (tag) params.set("tag", tag);
@@ -407,8 +411,26 @@ export default function ProductsPage() {
         if (radius) params.set("radius", radius);
         params.set("limit", 200);
         params.set("page", 1);
-
-        if (sortOption === "price-low-high") params.set("sort", "price_asc");
+        
+        let fetchHeaders = {};
+        let apiUrl = "/api/products";
+        
+        // --- UPDATED: Handle fetching Recommended data from the API endpoint itself ---
+        if (sortOption === "recommended") {
+            if (token) {
+                params.set("sort", "recommended");
+                apiUrl = `/api/products`; // Still hit main API, but sort parameter triggers logic in server
+                fetchHeaders = { 'Authorization': `Bearer ${token}` };
+            } else {
+                // If not logged in, just show nothing for recommended
+                setProducts([]);
+                setLoading(false);
+                return;
+            }
+        }
+        // -----------------------------------------------------------------------------
+        
+        else if (sortOption === "price-low-high") params.set("sort", "price_asc");
         else if (sortOption === "price-high-low")
           params.set("sort", "price_desc");
         else if (sortOption === "newest") params.set("sort", "createdAt:desc");
@@ -422,7 +444,7 @@ export default function ProductsPage() {
           }
         }
 
-        const res = await fetch(`/api/products?${params.toString()}`);
+        const res = await fetch(`${apiUrl}?${params.toString()}`, { headers: fetchHeaders });
         const data = await res.json();
         const items = data.items || [];
 
@@ -476,19 +498,22 @@ export default function ProductsPage() {
   ]);
 
   const pageTitle = useMemo(() => {
+    // --- UPDATED: Handle recommended title ---
+    if (sortOption === 'recommended') return "Recommended Products"; 
+    // ------------------------------------------
     if (radius) return "Local Products";
     if (q) return `Results for "${q}"`;
     if (tag) return `${tag.charAt(0).toUpperCase() + tag.slice(1)} Style`;
     return "All Products";
-  }, [q, tag, radius]);
+  }, [q, tag, radius, sortOption]);
 
   const breadcrumbPath = useMemo(() => {
     const crumbs = [];
-    const hasFilter = radius || q || tag || categoryId;
+    const hasFilter = radius || q || tag || categoryId || sortOption !== 'most-popular';
     if (hasFilter) crumbs.push({ label: "All Products", href: "/products" });
     crumbs.push(pageTitle);
     return crumbs;
-  }, [q, categoryId, tag, radius, pageTitle]);
+  }, [q, categoryId, tag, radius, pageTitle, sortOption]);
 
   return (
     <div className="min-h-screen bg-white font-sans text-black">
@@ -636,6 +661,7 @@ export default function ProductsPage() {
                       align="end"
                       className="bg-white rounded-xl shadow-lg border border-gray-100"
                     >
+                      <SelectItem value="recommended">Recommended</SelectItem> {/* ADDED */}
                       <SelectItem value="distance">
                         Distance: Nearest First
                       </SelectItem>
