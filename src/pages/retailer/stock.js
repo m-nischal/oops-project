@@ -1,3 +1,4 @@
+// src/pages/retailer/stock.js
 import React, {
   useEffect,
   useState,
@@ -53,6 +54,9 @@ import {
   QrCode,
   Wallet,
   XCircle,
+  Store,
+  Mail,
+  Phone,
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -94,11 +98,16 @@ function formatCardNumberDisplay(value) {
 }
 
 function validateCard(details) {
-  const cleanedNumber = String(details.number || "").replace(/\s/g, "").slice(0, 16);
-  const cleanedCvv = String(details.cvv || "").replace(/\D/g, "").slice(0, 3);
+  const cleanedNumber = String(details.number || "")
+    .replace(/\s/g, "")
+    .slice(0, 16);
+  const cleanedCvv = String(details.cvv || "")
+    .replace(/\D/g, "")
+    .slice(0, 3);
   const cleanedName = String(details.name || "").trim();
 
-  if (cleanedNumber.length !== 16) return "Card number must be exactly 16 digits.";
+  if (cleanedNumber.length !== 16)
+    return "Card number must be exactly 16 digits.";
   if (cleanedCvv.length !== 3) return "CVV must be exactly 3 digits.";
 
   const [monthStr, yearStr] = details.expiry.split("/");
@@ -123,17 +132,17 @@ function validateCard(details) {
 }
 
 function validateUpiId(id) {
-  const cleanedId = String(id || '').trim();
+  const cleanedId = String(id || "").trim();
   if (/[^a-zA-Z0-9@.]/.test(cleanedId)) {
-      return "UPI ID contains invalid characters. Only letters, numbers, '@', and '.' are allowed.";
+    return "UPI ID contains invalid characters. Only letters, numbers, '@', and '.' are allowed.";
   }
-  if (!cleanedId.includes('@')) return "UPI ID must contain '@'.";
-  
-  const parts = cleanedId.split('@');
+  if (!cleanedId.includes("@")) return "UPI ID must contain '@'.";
+
+  const parts = cleanedId.split("@");
   if (parts.length !== 2) return "UPI ID must contain exactly one '@'.";
   if (parts[0].length === 0) return "UPI ID missing prefix before '@'.";
   if (parts[1].length === 0) return "UPI ID missing provider after '@'.";
-  
+
   return null;
 }
 
@@ -152,7 +161,9 @@ const PAYMENT_OPTIONS = [
 export default function StockFromWholesalerPage() {
   const router = useRouter();
   const { isLoading: isAuthLoading } = useAuthGuard("RETAILER");
-
+  const [wholesalerContact, setWholesalerContact] = useState(null);
+  const [showWholesalerContactModal, setShowWholesalerContactModal] =
+    useState(false);
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -193,7 +204,7 @@ export default function StockFromWholesalerPage() {
   const [showUpiIdModal, setShowUpiIdModal] = useState(false);
   const [showUpiQrModal, setShowUpiQrModal] = useState(false);
   const [isOtpModalOpen, setIsOtpModalOpen] = useState(false);
-  
+
   // New state for payment failure modal
   const [showFailureModal, setShowFailureModal] = useState(false);
 
@@ -202,7 +213,6 @@ export default function StockFromWholesalerPage() {
   const [otpTimer, setOtpTimer] = useState(0);
   const [paymentError, setPaymentError] = useState(null);
   const otpTimerRef = useRef(null);
-
   const totalPages = Math.ceil(totalProducts / PRODUCTS_PER_PAGE);
 
   useEffect(() => {
@@ -237,7 +247,7 @@ export default function StockFromWholesalerPage() {
     if (router.isReady && router.query.q) {
       const query = router.query.q;
       setSearchQuery(query);
-      setDebouncedSearch(query); 
+      setDebouncedSearch(query);
     }
   }, [router.isReady, router.query.q]);
 
@@ -314,10 +324,40 @@ export default function StockFromWholesalerPage() {
 
   const handleOpenOrder = (product) => {
     setSelectedProduct(product);
+    // Fetch wholesaler details immediately when opening the order modal
+    if (product.ownerId) {
+      fetchWholesalerContact(product.ownerId);
+    } else {
+      setWholesalerContact({ name: "Unknown", email: "", phone: "" });
+    }
     if (product.sizes && product.sizes.length > 0)
       setOrderSize(product.sizes[0].size);
     setOrderQty(product.minOrderQuantity || 1);
     setSelectedPaymentMethod(PAYMENT_OPTIONS[0].id);
+  };
+
+  const fetchWholesalerContact = useCallback(async (wholesalerId) => {
+    setWholesalerContact({ name: "Loading...", email: "...", phone: "..." });
+    try {
+      const res = await fetch(`/api/public/user/${wholesalerId}`);
+      if (res.ok) {
+        const data = await res.json();
+        setWholesalerContact({
+          name: data.name || "Wholesaler",
+          email: data.email,
+          phone: data.phone,
+        });
+      } else {
+        setWholesalerContact({ name: "Error", email: "N/A", phone: "N/A" });
+      }
+    } catch (e) {
+      setWholesalerContact({ name: "Error", email: "N/A", phone: "N/A" });
+    }
+  }, []);
+
+  const handleOpenContactModal = (e) => {
+    e.stopPropagation(); // Prevent opening the order modal
+    setShowWholesalerContactModal(true);
   };
 
   const handlePaymentSelection = () => {
@@ -360,22 +400,22 @@ export default function StockFromWholesalerPage() {
 
   // New Handler for modal dismissal leading to failure popup
   const handlePaymentModalDismiss = (method) => {
-    if (method === 'Card') setShowCardModal(false);
-    if (method === 'UPI_ID') setShowUpiIdModal(false);
-    if (method === 'UPI_QR') setShowUpiQrModal(false);
-    if (method === 'OTP') setIsOtpModalOpen(false);
-    
+    if (method === "Card") setShowCardModal(false);
+    if (method === "UPI_ID") setShowUpiIdModal(false);
+    if (method === "UPI_QR") setShowUpiQrModal(false);
+    if (method === "OTP") setIsOtpModalOpen(false);
+
     setPaymentError("Payment cancelled by user.");
     setShowFailureModal(true);
   };
 
   const handleOtpUserDismiss = (open) => {
-    if (!open) handlePaymentModalDismiss('OTP');
+    if (!open) handlePaymentModalDismiss("OTP");
   };
 
   const handleRetryPayment = () => {
-      setShowFailureModal(false);
-      setPaymentError(null);
+    setShowFailureModal(false);
+    setPaymentError(null);
   };
 
   const handleQrSuccess = async () => {
@@ -456,10 +496,13 @@ export default function StockFromWholesalerPage() {
         </div>
 
         <div className="flex flex-wrap items-center justify-between gap-4 mb-8 bg-white p-4 rounded-2xl shadow-sm border border-gray-100">
-            <div className="flex items-center gap-3 flex-wrap">
+          <div className="flex items-center gap-3 flex-wrap">
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button variant="outline" className="rounded-full border-gray-300 gap-2">
+                <Button
+                  variant="outline"
+                  className="rounded-full border-gray-300 gap-2"
+                >
                   <Filter className="w-4 h-4" />
                   {selectedCategory === "All" ? "Filters" : selectedCategory}
                 </Button>
@@ -467,17 +510,38 @@ export default function StockFromWholesalerPage() {
               <DropdownMenuContent className="w-64 p-4" align="start">
                 <DropdownMenuLabel>Category</DropdownMenuLabel>
                 <DropdownMenuSeparator />
-                <DropdownMenuRadioGroup value={selectedCategory} onValueChange={setSelectedCategory}>
-                  <DropdownMenuRadioItem value="All">All Categories</DropdownMenuRadioItem>
+                <DropdownMenuRadioGroup
+                  value={selectedCategory}
+                  onValueChange={setSelectedCategory}
+                >
+                  <DropdownMenuRadioItem value="All">
+                    All Categories
+                  </DropdownMenuRadioItem>
                   {CATEGORY_OPTIONS.map((cat) => (
-                    <DropdownMenuRadioItem key={cat} value={cat}>{cat}</DropdownMenuRadioItem>
+                    <DropdownMenuRadioItem key={cat} value={cat}>
+                      {cat}
+                    </DropdownMenuRadioItem>
                   ))}
                 </DropdownMenuRadioGroup>
                 <div className="my-3 border-t pt-3">
-                  <DropdownMenuLabel className="px-0 mb-2">Price Range (₹)</DropdownMenuLabel>
+                  <DropdownMenuLabel className="px-0 mb-2">
+                    Price Range (₹)
+                  </DropdownMenuLabel>
                   <div className="flex gap-2">
-                    <Input placeholder="Min" type="number" value={minPrice} onChange={(e) => setMinPrice(e.target.value)} className="h-8 text-xs" />
-                    <Input placeholder="Max" type="number" value={maxPrice} onChange={(e) => setMaxPrice(e.target.value)} className="h-8 text-xs" />
+                    <Input
+                      placeholder="Min"
+                      type="number"
+                      value={minPrice}
+                      onChange={(e) => setMinPrice(e.target.value)}
+                      className="h-8 text-xs"
+                    />
+                    <Input
+                      placeholder="Max"
+                      type="number"
+                      value={maxPrice}
+                      onChange={(e) => setMaxPrice(e.target.value)}
+                      className="h-8 text-xs"
+                    />
                   </div>
                 </div>
               </DropdownMenuContent>
@@ -485,8 +549,13 @@ export default function StockFromWholesalerPage() {
 
             <div className="flex items-center gap-2 bg-gray-50 px-3 py-1.5 rounded-full border border-gray-200">
               <MapPin className="w-4 h-4 text-gray-500" />
-              <span className="text-xs font-medium text-gray-500 hidden sm:inline">Ship to:</span>
-              <Select value={selectedLocationId} onValueChange={handleLocationChange}>
+              <span className="text-xs font-medium text-gray-500 hidden sm:inline">
+                Ship to:
+              </span>
+              <Select
+                value={selectedLocationId}
+                onValueChange={handleLocationChange}
+              >
                 <SelectTrigger className="h-8 w-[160px] border-none bg-transparent shadow-none focus:ring-0 p-0 text-xs font-bold truncate">
                   <SelectValue placeholder="Select Address" />
                 </SelectTrigger>
@@ -498,7 +567,9 @@ export default function StockFromWholesalerPage() {
                       </SelectItem>
                     ))
                   ) : (
-                    <SelectItem value="none" disabled>No addresses found</SelectItem>
+                    <SelectItem value="none" disabled>
+                      No addresses found
+                    </SelectItem>
                   )}
                 </SelectContent>
               </Select>
@@ -506,7 +577,9 @@ export default function StockFromWholesalerPage() {
           </div>
 
           <div className="flex items-center gap-2">
-            <span className="text-sm text-gray-500 hidden sm:inline">Sort by:</span>
+            <span className="text-sm text-gray-500 hidden sm:inline">
+              Sort by:
+            </span>
             <Select value={sortOption} onValueChange={setSortOption}>
               <SelectTrigger className="w-[180px] rounded-full h-10 border-gray-300">
                 <SelectValue placeholder="Sort By" />
@@ -515,7 +588,9 @@ export default function StockFromWholesalerPage() {
                 <SelectItem value="newest">Newest Arrivals</SelectItem>
                 <SelectItem value="price_low">Price: Low to High</SelectItem>
                 <SelectItem value="price_high">Price: High to Low</SelectItem>
-                <SelectItem value="distance">Distance: Nearest First</SelectItem>
+                <SelectItem value="distance">
+                  Distance: Nearest First
+                </SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -524,16 +599,27 @@ export default function StockFromWholesalerPage() {
         {!loading && !error && products.length > 0 && (
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-x-6 gap-y-10">
             {products.map((product) => {
-              const isStocking = selectedProduct && selectedProduct._id === product._id && isOrdering;
+              const isStocking =
+                selectedProduct &&
+                selectedProduct._id === product._id &&
+                isOrdering;
               const isStocked = stockedProductIds.has(product._id);
               const distKm = product._distance;
 
               return (
-                <div key={product._id} className="group cursor-pointer" onClick={() => handleOpenOrder(product)}>
+                <div
+                  key={product._id}
+                  className="group cursor-pointer"
+                  onClick={() => handleOpenOrder(product)}
+                >
                   <Card className="border-none shadow-none bg-transparent">
                     <CardContent className="p-0">
                       <div className="bg-[#F0EEED] rounded-[20px] aspect-square mb-4 overflow-hidden relative group-hover:scale-[1.02] transition-transform">
-                        <img src={product.images?.[0] || "/images/placeholder.png"} alt={product.name} className="w-full h-full object-cover mix-blend-multiply" />
+                        <img
+                          src={product.images?.[0] || "/images/placeholder.png"}
+                          alt={product.name}
+                          className="w-full h-full object-cover mix-blend-multiply"
+                        />
                         <div className="absolute top-3 left-3 flex flex-col gap-2 items-start">
                           {product.minOrderQuantity > 1 && (
                             <span className="bg-black/80 backdrop-blur-sm text-white text-[10px] font-bold px-3 py-1 rounded-full shadow-sm">
@@ -547,21 +633,62 @@ export default function StockFromWholesalerPage() {
                               <Truck className="w-3 h-3 text-blue-600" />
                             </div>
                             <div className="flex flex-col leading-none">
-                              <span className="text-[10px] text-gray-500 font-medium">Estimated Delivery</span>
-                              <span className="text-xs font-bold text-gray-900">{getEstimatedDeliveryDate(distKm)}</span>
+                              <span className="text-[10px] text-gray-500 font-medium">
+                                Estimated Delivery
+                              </span>
+                              <span className="text-xs font-bold text-gray-900">
+                                {getEstimatedDeliveryDate(distKm)}
+                              </span>
                             </div>
                           </div>
                         )}
                       </div>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="absolute top-3 left-3 text-[10px] h-6 px-2 py-1 bg-white/90 backdrop-blur-sm border-gray-300 hover:bg-gray-100/90 text-gray-700 font-bold shadow-sm flex items-center gap-1"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setWholesalerContact(null); // Reset
+                          setSelectedProduct(product); // Set product to use its ownerId
+                          handleOpenContactModal(e);
+                        }}
+                      >
+                        <Store className="h-3 w-3" /> Info
+                      </Button>
                       <div className="space-y-1 px-1">
-                        <h3 className="font-bold text-lg truncate leading-tight text-black group-hover:text-gray-600 transition-colors">{product.name}</h3>
+                        <h3 className="font-bold text-lg truncate leading-tight text-black group-hover:text-gray-600 transition-colors">
+                          {product.name}
+                        </h3>
                         <div className="flex items-center justify-between mt-2">
                           <div className="flex flex-col">
-                            <span className="font-bold text-xl">{formatPrice(product.price)}</span>
-                            <span className="text-xs text-gray-400">Wholesale Price</span>
+                            <span className="font-bold text-xl">
+                              {formatPrice(product.price)}
+                            </span>
+                            <span className="text-xs text-gray-400">
+                              Wholesale Price
+                            </span>
                           </div>
-                          <Button disabled={isStocking || isStocked} size="icon" className={`rounded-full w-10 h-10 shadow-sm transition-all ${isStocked ? "bg-green-100 text-green-600 hover:bg-green-200" : "bg-black text-white hover:scale-110"}`} onClick={(e) => { e.stopPropagation(); handleOpenOrder(product); }}>
-                            {isStocking ? <Loader2 className="h-4 w-4 animate-spin" /> : isStocked ? <Check className="h-5 w-5" /> : <ShoppingCart className="h-4 w-4" />}
+                          <Button
+                            disabled={isStocking || isStocked}
+                            size="icon"
+                            className={`rounded-full w-10 h-10 shadow-sm transition-all ${
+                              isStocked
+                                ? "bg-green-100 text-green-600 hover:bg-green-200"
+                                : "bg-black text-white hover:scale-110"
+                            }`}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleOpenOrder(product);
+                            }}
+                          >
+                            {isStocking ? (
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                            ) : isStocked ? (
+                              <Check className="h-5 w-5" />
+                            ) : (
+                              <ShoppingCart className="h-4 w-4" />
+                            )}
                           </Button>
                         </div>
                       </div>
@@ -576,11 +703,65 @@ export default function StockFromWholesalerPage() {
         {!loading && !error && totalPages > 1 && (
           <Pagination className="mt-16">
             <PaginationContent>
-              <PaginationItem><Button variant="ghost" size="icon" className="rounded-full w-9 h-9" onClick={() => setPage(1)} disabled={page === 1}><ChevronsLeft className="h-4 w-4" /></Button></PaginationItem>
-              <PaginationItem><PaginationPrevious href="#" onClick={(e) => { e.preventDefault(); setPage(page - 1); }} className={page === 1 ? "opacity-50 pointer-events-none" : "cursor-pointer hover:bg-gray-100 rounded-full"} /></PaginationItem>
-              <PaginationItem><PaginationLink href="#" isActive className="rounded-full bg-black text-white">{page}</PaginationLink></PaginationItem>
-              <PaginationItem><PaginationNext href="#" onClick={(e) => { e.preventDefault(); setPage(page + 1); }} className={page >= totalPages ? "opacity-50 pointer-events-none" : "cursor-pointer hover:bg-gray-100 rounded-full"} /></PaginationItem>
-              <PaginationItem><Button variant="ghost" size="icon" className="rounded-full w-9 h-9" onClick={() => setPage(totalPages)} disabled={page >= totalPages}><ChevronsRight className="h-4 w-4" /></Button></PaginationItem>
+              <PaginationItem>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="rounded-full w-9 h-9"
+                  onClick={() => setPage(1)}
+                  disabled={page === 1}
+                >
+                  <ChevronsLeft className="h-4 w-4" />
+                </Button>
+              </PaginationItem>
+              <PaginationItem>
+                <PaginationPrevious
+                  href="#"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    setPage(page - 1);
+                  }}
+                  className={
+                    page === 1
+                      ? "opacity-50 pointer-events-none"
+                      : "cursor-pointer hover:bg-gray-100 rounded-full"
+                  }
+                />
+              </PaginationItem>
+              <PaginationItem>
+                <PaginationLink
+                  href="#"
+                  isActive
+                  className="rounded-full bg-black text-white"
+                >
+                  {page}
+                </PaginationLink>
+              </PaginationItem>
+              <PaginationItem>
+                <PaginationNext
+                  href="#"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    setPage(page + 1);
+                  }}
+                  className={
+                    page >= totalPages
+                      ? "opacity-50 pointer-events-none"
+                      : "cursor-pointer hover:bg-gray-100 rounded-full"
+                  }
+                />
+              </PaginationItem>
+              <PaginationItem>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="rounded-full w-9 h-9"
+                  onClick={() => setPage(totalPages)}
+                  disabled={page >= totalPages}
+                >
+                  <ChevronsRight className="h-4 w-4" />
+                </Button>
+              </PaginationItem>
             </PaginationContent>
           </Pagination>
         )}
@@ -593,7 +774,7 @@ export default function StockFromWholesalerPage() {
             !showCardModal &&
             !showUpiIdModal &&
             !showUpiQrModal &&
-            !showFailureModal 
+            !showFailureModal
           }
           onOpenChange={(open) => !open && setSelectedProduct(null)}
         >
@@ -602,35 +783,69 @@ export default function StockFromWholesalerPage() {
               <DialogTitle>Stock Product</DialogTitle>
             </DialogHeader>
             <div className="grid gap-6 py-4">
-              <div className="flex gap-4 p-4 bg-gray-50 rounded-2xl items-center border border-gray-100">
+              <div className="flex gap-4 p-4 bg-gray-50 rounded-2xl items-start border border-gray-100 relative">
                 <div className="w-16 h-16 bg-white rounded-xl overflow-hidden border border-gray-200 shrink-0">
-                  <img src={selectedProduct?.images?.[0]} className="w-full h-full object-cover" alt="" />
+                  <img
+                    src={selectedProduct?.images?.[0]}
+                    className="w-full h-full object-cover"
+                    alt=""
+                  />
                 </div>
-                <div>
-                  <p className="font-bold text-sm line-clamp-1">{selectedProduct?.name}</p>
-                  <p className="text-xs text-gray-500 mt-1">{formatPrice(selectedProduct?.price)} / unit</p>
+                <div className="flex-1 min-w-0">
+                  <p className="font-bold text-sm line-clamp-1">
+                    {selectedProduct?.name}
+                  </p>
+                  <p className="text-xs text-gray-500 mt-1">
+                    {formatPrice(selectedProduct?.price)} / unit
+                  </p>
+                  
+                  {/* ADDED: Wholesaler Info Inline */}
+                  <div className="mt-3 pt-3 border-t border-gray-200 flex flex-col gap-1">
+                     <div className="flex items-center gap-1.5 text-xs font-medium text-gray-900">
+                         <Store className="w-3 h-3 text-blue-600" />
+                         {wholesalerContact?.name || "Loading Seller..."}
+                     </div>
+                     {wholesalerContact?.phone && (
+                        <div className="flex items-center gap-1.5 text-[10px] text-gray-500">
+                            <Phone className="w-3 h-3" /> {wholesalerContact.phone}
+                        </div>
+                     )}
+                  </div>
                 </div>
               </div>
+
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label>Size Variant</Label>
                   <Select value={orderSize} onValueChange={setOrderSize}>
-                    <SelectTrigger className="h-11 rounded-xl"><SelectValue placeholder="Select size" /></SelectTrigger>
+                    <SelectTrigger className="h-11 rounded-xl">
+                      <SelectValue placeholder="Select size" />
+                    </SelectTrigger>
                     <SelectContent>
                       {selectedProduct?.sizes?.map((s) => (
-                        <SelectItem key={s.size} value={s.size}>{s.size} ({s.stock})</SelectItem>
+                        <SelectItem key={s.size} value={s.size}>
+                          {s.size} ({s.stock})
+                        </SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
                 </div>
                 <div className="space-y-2">
                   <Label>Quantity</Label>
-                  <Input type="number" value={orderQty} onChange={(e) => setOrderQty(e.target.value)} min={selectedProduct?.minOrderQuantity || 1} className="h-11 rounded-xl" />
+                  <Input
+                    type="number"
+                    value={orderQty}
+                    onChange={(e) => setOrderQty(e.target.value)}
+                    min={selectedProduct?.minOrderQuantity || 1}
+                    className="h-11 rounded-xl"
+                  />
                 </div>
               </div>
               <div className="flex justify-between items-center pt-4 border-t border-gray-100">
                 <span className="font-medium text-gray-500">Total Cost</span>
-                <span className="font-black text-3xl">{formatPrice((selectedProduct?.price || 0) * orderQty)}</span>
+                <span className="font-black text-3xl">
+                  {formatPrice((selectedProduct?.price || 0) * orderQty)}
+                </span>
               </div>
               <hr className="border-gray-100" />
               <div className="space-y-3">
@@ -648,9 +863,13 @@ export default function StockFromWholesalerPage() {
                     >
                       <div className="flex items-center gap-3">
                         <option.icon className="h-5 w-5 text-gray-600" />
-                        <span className="text-sm font-medium">{option.label}</span>
+                        <span className="text-sm font-medium">
+                          {option.label}
+                        </span>
                       </div>
-                      {selectedPaymentMethod === option.id && <div className="h-4 w-4 rounded-full bg-black" />}
+                      {selectedPaymentMethod === option.id && (
+                        <div className="h-4 w-4 rounded-full bg-black" />
+                      )}
                     </div>
                   ))}
                 </div>
@@ -673,29 +892,42 @@ export default function StockFromWholesalerPage() {
             </DialogFooter>
           </DialogContent>
         </Dialog>
-
+        <WholesalerContactModal
+          isOpen={showWholesalerContactModal}
+          onClose={() => {
+            setShowWholesalerContactModal(false);
+            setWholesalerContact(null);
+          }}
+          wholesaler={wholesalerContact}
+        />
         {/* ... (Payment Modals with Fixed Layouts) ... */}
-        <CardInputModal 
-            isOpen={showCardModal} 
-            onClose={() => setShowCardModal(false)} 
-            cardDetails={cardDetails} 
-            setCardDetails={setCardDetails} 
-            onConfirm={() => { setShowCardModal(false); handleDetailsConfirmed(); }} 
-            onCancel={() => handlePaymentModalDismiss('Card')}
+        <CardInputModal
+          isOpen={showCardModal}
+          onClose={() => setShowCardModal(false)}
+          cardDetails={cardDetails}
+          setCardDetails={setCardDetails}
+          onConfirm={() => {
+            setShowCardModal(false);
+            handleDetailsConfirmed();
+          }}
+          onCancel={() => handlePaymentModalDismiss("Card")}
         />
-        <UpiIdInputModal 
-            isOpen={showUpiIdModal} 
-            onClose={() => setShowUpiIdModal(false)} 
-            upiId={upiId} 
-            setUpiId={setUpiId} 
-            onConfirm={() => { setShowUpiIdModal(false); handleDetailsConfirmed(); }} 
-            onCancel={() => handlePaymentModalDismiss('UPI_ID')}
+        <UpiIdInputModal
+          isOpen={showUpiIdModal}
+          onClose={() => setShowUpiIdModal(false)}
+          upiId={upiId}
+          setUpiId={setUpiId}
+          onConfirm={() => {
+            setShowUpiIdModal(false);
+            handleDetailsConfirmed();
+          }}
+          onCancel={() => handlePaymentModalDismiss("UPI_ID")}
         />
-        <UpiQrModal 
-            isOpen={showUpiQrModal} 
-            onClose={() => handlePaymentModalDismiss('UPI_QR')} 
-            onPaymentSuccess={handleQrSuccess} 
-            grandTotal={(selectedProduct?.price || 0) * orderQty} 
+        <UpiQrModal
+          isOpen={showUpiQrModal}
+          onClose={() => handlePaymentModalDismiss("UPI_QR")}
+          onPaymentSuccess={handleQrSuccess}
+          grandTotal={(selectedProduct?.price || 0) * orderQty}
         />
 
         <Dialog open={isOtpModalOpen} onOpenChange={handleOtpUserDismiss}>
@@ -725,7 +957,7 @@ export default function StockFromWholesalerPage() {
                 <p className="text-red-500 text-sm">{paymentError}</p>
               )}
             </div>
-            
+
             {/* FIX: Stacked Buttons using flex-col */}
             <DialogFooter className="flex-col sm:flex-col sm:space-x-0 gap-2">
               <Button
@@ -756,14 +988,16 @@ export default function StockFromWholesalerPage() {
               <div className="mx-auto w-12 h-12 rounded-full bg-red-100 flex items-center justify-center mb-4">
                 <XCircle className="h-6 w-6 text-red-600" />
               </div>
-              <DialogTitle className="text-center text-red-600 text-xl">Payment Failed</DialogTitle>
+              <DialogTitle className="text-center text-red-600 text-xl">
+                Payment Failed
+              </DialogTitle>
               <DialogDescription className="text-center text-gray-600">
                 {paymentError || "Your payment was cancelled or failed."}
               </DialogDescription>
             </DialogHeader>
             <DialogFooter className="sm:justify-center">
-              <Button 
-                onClick={handleRetryPayment} 
+              <Button
+                onClick={handleRetryPayment}
                 className="w-full sm:w-auto bg-black hover:bg-gray-800 text-white"
               >
                 Retry Payment
@@ -799,14 +1033,62 @@ export default function StockFromWholesalerPage() {
 }
 
 // --- SUB-COMPONENTS ---
+function WholesalerContactModal({ isOpen, onClose, wholesaler }) {
+  return (
+    <Dialog open={isOpen} onOpenChange={onClose}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle className="text-2xl flex items-center gap-2">
+            <Store className="h-6 w-6" />
+            {wholesaler?.name || "Wholesaler Info"}
+          </DialogTitle>
+          <DialogDescription>
+            Contact details for your supplier.
+          </DialogDescription>
+        </DialogHeader>
 
+        <div className="space-y-4 py-4">
+          {wholesaler?.name === "Loading..." ? (
+            <div className="flex items-center justify-center py-6 text-gray-500">
+              <Loader2 className="h-6 w-6 animate-spin mr-2" /> Loading contact
+              details...
+            </div>
+          ) : (
+            <Card className="shadow-sm border-dashed">
+              <CardContent className="p-4 space-y-3">
+                <div className="flex items-center gap-3">
+                  <Mail className="h-5 w-5 text-gray-600" />
+                  <span className="font-semibold text-sm">
+                    {wholesaler?.email || "Email Not Listed"}
+                  </span>
+                </div>
+                <div className="flex items-center gap-3">
+                  <Phone className="h-5 w-5 text-gray-600" />
+                  <span className="font-semibold text-sm">
+                    {wholesaler?.phone || "Phone Not Listed"}
+                  </span>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+        </div>
+
+        <DialogFooter>
+          <Button onClick={onClose} className="w-full">
+            Close
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
 function CardInputModal({
   isOpen,
   onClose,
   cardDetails,
   setCardDetails,
   onConfirm,
-  onCancel
+  onCancel,
 }) {
   const [localDetails, setLocalDetails] = useState(cardDetails);
   const [err, setErr] = useState("");
@@ -824,7 +1106,9 @@ function CardInputModal({
     onConfirm();
   };
 
-  const handleClose = (open) => { if (!open) onCancel(); };
+  const handleClose = (open) => {
+    if (!open) onCancel();
+  };
 
   return (
     <Dialog open={isOpen} onOpenChange={handleClose}>
@@ -851,11 +1135,12 @@ function CardInputModal({
               onChange={(e) => {
                 let v = e.target.value.replace(/\D/g, "");
                 if (v.length >= 2) {
-                    const mm = parseInt(v.slice(0, 2), 10);
-                    if (mm > 12) return; 
+                  const mm = parseInt(v.slice(0, 2), 10);
+                  if (mm > 12) return;
                 }
                 if (v.length > 2) v = v.slice(0, 2) + "/" + v.slice(2, 4);
-                else if (v.length === 2 && localDetails.expiry.length < 2) v = v + "/";
+                else if (v.length === 2 && localDetails.expiry.length < 2)
+                  v = v + "/";
                 setLocalDetails({ ...localDetails, expiry: v.slice(0, 5) });
               }}
               maxLength={5}
@@ -879,24 +1164,35 @@ function CardInputModal({
             onChange={(e) =>
               setLocalDetails({
                 ...localDetails,
-                name: e.target.value.toUpperCase().replace(/[^A-Z\s]/g, ''),
+                name: e.target.value.toUpperCase().replace(/[^A-Z\s]/g, ""),
               })
             }
           />
           {err && <p className="text-red-500 text-xs">{err}</p>}
         </div>
-        
+
         {/* FIX: Stacked Buttons using flex-col */}
         <DialogFooter className="flex-col sm:flex-col sm:space-x-0 gap-2">
-          <Button onClick={handleSave} className="w-full">Next</Button>
-          <Button variant="outline" onClick={onCancel} className="w-full">Cancel</Button>
+          <Button onClick={handleSave} className="w-full">
+            Next
+          </Button>
+          <Button variant="outline" onClick={onCancel} className="w-full">
+            Cancel
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
   );
 }
 
-function UpiIdInputModal({ isOpen, onClose, upiId, setUpiId, onConfirm, onCancel }) {
+function UpiIdInputModal({
+  isOpen,
+  onClose,
+  upiId,
+  setUpiId,
+  onConfirm,
+  onCancel,
+}) {
   const [localId, setLocalId] = useState(upiId);
   const [err, setErr] = useState("");
   const handleUpiInputChange = (e) => {
@@ -915,8 +1211,10 @@ function UpiIdInputModal({ isOpen, onClose, upiId, setUpiId, onConfirm, onCancel
     setUpiId(localId);
     onConfirm();
   };
-  
-  const handleClose = (open) => { if (!open) onCancel(); }
+
+  const handleClose = (open) => {
+    if (!open) onCancel();
+  };
 
   return (
     <Dialog open={isOpen} onOpenChange={handleClose}>
@@ -934,8 +1232,12 @@ function UpiIdInputModal({ isOpen, onClose, upiId, setUpiId, onConfirm, onCancel
         </div>
         {/* FIX: Stacked Buttons using flex-col */}
         <DialogFooter className="flex-col sm:flex-col sm:space-x-0 gap-2">
-          <Button onClick={handleSave} className="w-full">Next</Button>
-          <Button variant="outline" onClick={onCancel} className="w-full">Cancel</Button>
+          <Button onClick={handleSave} className="w-full">
+            Next
+          </Button>
+          <Button variant="outline" onClick={onCancel} className="w-full">
+            Cancel
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -958,7 +1260,7 @@ function UpiQrModal({ isOpen, onClose, onPaymentSuccess, grandTotal }) {
             />
           </div>
         </div>
-        
+
         {/* FIX: Stacked Buttons using flex-col - Primary Top, Cancel Bottom */}
         <DialogFooter className="flex-col sm:flex-col sm:space-x-0 gap-2">
           <Button className="w-full bg-green-600" onClick={onPaymentSuccess}>

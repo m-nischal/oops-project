@@ -10,10 +10,13 @@ function calculateDistance(lat1, lon1, lat2, lon2) {
   const R = 6371; // km
   const dLat = (lat2 - lat1) * (Math.PI / 180);
   const dLon = (lon2 - lon1) * (Math.PI / 180);
-  const a = 
+  const a =
     Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-    Math.cos(lat1 * (Math.PI / 180)) * Math.cos(lat2 * (Math.PI / 180)) * Math.sin(dLon / 2) * Math.sin(dLon / 2); 
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)); 
+    Math.cos(lat1 * (Math.PI / 180)) *
+      Math.cos(lat2 * (Math.PI / 180)) *
+      Math.sin(dLon / 2) *
+      Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
   return R * c;
 }
 
@@ -27,25 +30,25 @@ export default async function handler(req, res) {
 
   if (req.method === "GET") {
     try {
-      const { 
-        categoryId, 
-        limit = 20, 
-        page = 1, 
-        q = "", 
-        inStockOnly, 
-        storefront, 
-        sort, 
+      const {
+        categoryId,
+        limit = 20,
+        page = 1,
+        q = "",
+        inStockOnly,
+        storefront,
+        sort,
         tag,
-        lat, 
-        lng, 
+        lat,
+        lng,
         radius,
         minPrice,
-        maxPrice
+        maxPrice,
       } = req.query;
-      
+
       // 1. Base Filter
       const filter = {
-        isPublished: true 
+        isPublished: true,
       };
 
       // 2. Category Filter
@@ -55,7 +58,7 @@ export default async function handler(req, res) {
 
       // 3. Storefront Filter
       if (storefront) filter.storefronts = storefront;
-      
+
       // 4. Stock Filter
       if (inStockOnly === "true") {
         filter["sizes.stock"] = { $gt: 0 };
@@ -67,122 +70,89 @@ export default async function handler(req, res) {
         if (minPrice) filter.price.$gte = Number(minPrice);
         if (maxPrice) filter.price.$lte = Number(maxPrice);
       }
-      
+
       // 6. ADVANCED Search Query (Custom Gender/Unisex Logic)
       if (q) {
-        const terms = q.trim().split(/\s+/).filter(t => t.length > 0);
-        const qLower = q.trim().toLowerCase();
+        const terms = q
+          .trim()
+          .toLowerCase()
+          .split(/\s+/)
+          .filter((t) => t.length > 0);
 
         if (terms.length > 0) {
-            
-            let customFilter = null;
-            let isCustomGenderSearch = false;
-            
-            // Helper to build a regex OR condition for name/tags
-            const buildRegexOr = (patterns) => {
-                const regexes = patterns.map(p => new RegExp(`\\b${p}\\b`, 'i'));
-                return { $in: regexes };
-            };
+          // 6a. Find Retailers (Sellers for B2C) whose names match ANY search term
+          const anyTermRegex = new RegExp(
+            terms.map((t) => escapeRegex(t)).join("|"),
+            "i"
+          );
+          // Customer storefront focuses on RETAILERS selling to them
+          const matchingSellers = await User.find({
+            role: "RETAILER",
+            name: { $regex: anyTermRegex },
+          })
+            .select("_id name")
+            .lean();
 
-            // --- Apply Custom Gender/Unisex Rules (Rules 1-5) ---
-            
-            // Rule 5: Unisex Filter (must be explicitly searching for it)
-            if (qLower === 'unisex') {
-                isCustomGenderSearch = true;
-                customFilter = {
-                    $or: [
-                        { tags: { $all: [/boys/i, /girls/i] } },
-                        { tags: { $all: [/men/i, /women/i] } },
-                        { tags: { $in: [/unisex/i] } }
-                    ]
-                };
-            } 
-            // Rule 1: Men Filter (Men OR Unisex)
-            else if (terms.some(t => ['men', 'man', 'mens'].includes(t.toLowerCase()))) {
-                isCustomGenderSearch = true;
-                const patterns = ['man', 'men', 'mens', 'unisex'];
-                customFilter = { $or: [{ name: buildRegexOr(patterns) }, { tags: buildRegexOr(patterns) }] };
-            } 
-            // Rule 2: Women Filter (Women OR Unisex)
-            else if (terms.some(t => ['women', 'woman', 'womens'].includes(t.toLowerCase()))) {
-                isCustomGenderSearch = true;
-                const patterns = ['woman', 'women', 'womens', 'unisex'];
-                customFilter = { $or: [{ name: buildRegexOr(patterns) }, { tags: buildRegexOr(patterns) }] };
-            } 
-            // Rule 3: Boys Filter (Boys OR Unisex)
-            else if (terms.some(t => ['boy', 'boys'].includes(t.toLowerCase()))) {
-                isCustomGenderSearch = true;
-                const patterns = ['boy', 'boys', 'unisex'];
-                customFilter = { $or: [{ name: buildRegexOr(patterns) }, { tags: buildRegexOr(patterns) }] };
-            } 
-            // Rule 4: Girls Filter (Girls OR Unisex)
-            else if (terms.some(t => ['girl', 'girls'].includes(t.toLowerCase()))) {
-                isCustomGenderSearch = true;
-                const patterns = ['girl', 'girls', 'unisex'];
-                customFilter = { $or: [{ name: buildRegexOr(patterns) }, { tags: buildRegexOr(patterns) }] };
-            }
-            
-            const finalAndConditions = [];
-            
-            // 6a. If a custom filter was made, include it.
-            if (isCustomGenderSearch) {
-                finalAndConditions.push(customFilter);
+          const allTermConditions = [];
+          const genderTerms = new Set([
+            "men",
+            "mens",
+            "women",
+            "womens",
+            "boy",
+            "boys",
+            "girl",
+            "girls",
+            "unisex",
+          ]);
+
+          // 6b. Build search conditions: all terms must match (AND logic)
+          for (const term of terms) {
+            const safeTerm = escapeRegex(term);
+            let regexPattern;
+
+            // Handle Gender terms specially (look for word boundaries)
+            if (genderTerms.has(term)) {
+              // Use word boundary for strict matching of gender terms
+              if (term.startsWith("men")) regexPattern = "\\bmen('?s?)?\\b";
+              else if (term.startsWith("women"))
+                regexPattern = "\\bwomen('?s?)?\\b";
+              else if (term.startsWith("boy"))
+                regexPattern = "\\bboy('?s?)?\\b";
+              else if (term.startsWith("girl"))
+                regexPattern = "\\bgirl('?s?)?\\b";
+              else regexPattern = `\\b${safeTerm}\\b`;
+            } else {
+              // General terms can match anywhere
+              regexPattern = safeTerm;
             }
 
-            // 6b. Fallback to original complex general search logic for all terms
-            // This handles non-gender terms (e.g., 'blue', 'shirt') AND integrates retailer search.
-            
-            const anyTermRegex = new RegExp(terms.map(t => escapeRegex(t)).join("|"), "i");
-            const matchingRetailers = await User.find({ 
-                role: "RETAILER", 
-                name: { $regex: anyTermRegex } 
-            }).select("_id name").lean();
+            const termRegex = new RegExp(regexPattern, "i");
 
-            const strictTerms = new Set([ "men", "mens", "women", "womens", "boy", "boys", "girl", "girls", "unisex" ]);
-            
-            const termConditions = terms.map(term => {
-                const lower = term.toLowerCase();
-                const safeTerm = escapeRegex(term);
-                let regexPattern;
+            // Filter seller IDs who match this SPECIFIC term's regex
+            const sellerIdsForTerm = matchingSellers
+              .filter((r) => termRegex.test(r.name))
+              .map((r) => r._id);
 
-                // This section implements the default logic for non-gender terms
-                if (strictTerms.has(lower)) {
-                    if (lower.startsWith("men")) regexPattern = "\\bmen('?s?)?\\b";
-                    else if (lower.startsWith("women")) regexPattern = "\\bwomen('?s?)?\\b";
-                    else regexPattern = `\\b${safeTerm}\\b`;
-                } else {
-                    // Use simple safe term for general search
-                    regexPattern = safeTerm;
-                }
-
-                const termRegex = new RegExp(regexPattern, "i");
-                
-                const retailerIds = matchingRetailers.filter(r => termRegex.test(r.name)).map(r => r._id);
-
-                return {
-                    $or: [
-                        { name: { $regex: termRegex } },
-                        { description: { $regex: termRegex } },
-                        { tags: { $regex: termRegex } },
-                        { category: { $regex: termRegex } },
-                        { brand: { $regex: termRegex } },
-                        { ownerId: { $in: retailerIds } },
-                    ],
-                };
+            // Each term must match in one of the fields (OR logic for fields)
+            allTermConditions.push({
+              $or: [
+                { name: { $regex: termRegex } },
+                { description: { $regex: termRegex } },
+                { tags: { $regex: termRegex } },
+                { category: { $regex: termRegex } },
+                { brand: { $regex: termRegex } },
+                { ownerId: { $in: sellerIdsForTerm } }, // Match seller name
+              ],
             });
-            
-            // Combine both custom (if present) and general search results
-            if (!isCustomGenderSearch || terms.length > 1) {
-                finalAndConditions.push(...termConditions);
-            }
-            
-            if (finalAndConditions.length > 0) {
-                if (filter.$and) {
-                    filter.$and.push(...finalAndConditions);
-                } else {
-                    filter.$and = finalAndConditions;
-                }
-            }
+          }
+
+          if (allTermConditions.length > 0) {
+            // Apply the new AND conditions
+            if (!filter.$and) filter.$and = [];
+            // Enforce that ALL search terms must match at least one field
+            filter.$and.push({ $and: allTermConditions });
+          }
         }
       }
 
@@ -196,76 +166,78 @@ export default async function handler(req, res) {
         const radiusInRadians = Number(radius) / 6378.1;
         filter["manufacturedAt.location"] = {
           $geoWithin: {
-            $centerSphere: [[Number(lng), Number(lat)], radiusInRadians]
-          }
+            $centerSphere: [[Number(lng), Number(lat)], radiusInRadians],
+          },
         };
       }
 
       // --- EXCLUDE WHOLESALERS ---
-      const wholesalers = await User.find({ role: "WHOLESALER" }).select("_id").lean();
-      const wholesalerIds = wholesalers.map(u => u._id);
+      const wholesalers = await User.find({ role: "WHOLESALER" })
+        .select("_id")
+        .lean();
+      const wholesalerIds = wholesalers.map((u) => u._id);
       if (wholesalerIds.length > 0) {
-         const exclusion = { ownerId: { $nin: wholesalerIds } };
-         if (!filter.$and) filter.$and = [];
-         
-         if (filter.ownerId) {
-             filter.$and.push({ ownerId: filter.ownerId });
-             delete filter.ownerId;
-         }
-         filter.$and.push(exclusion);
+        const exclusion = { ownerId: { $nin: wholesalerIds } };
+        if (!filter.$and) filter.$and = [];
+
+        if (filter.ownerId) {
+          filter.$and.push({ ownerId: filter.ownerId });
+          delete filter.ownerId;
+        }
+        filter.$and.push(exclusion);
       }
 
       // 9. SORTING & PAGINATION
-      
+
       // --- A. DISTANCE SORT (In-Memory) ---
-      if (sort === 'distance' && lat && lng) {
-          const userLat = Number(lat);
-          const userLng = Number(lng);
-          
-          const allProducts = await CatalogService.getProducts(filter, { 
-              lean: true, 
-              limit: 0, 
-              sort: { createdAt: -1 }
-          });
+      if (sort === "distance" && lat && lng) {
+        const userLat = Number(lat);
+        const userLng = Number(lng);
 
-          allProducts.forEach(p => {
-              const wLoc = p.warehouses?.[0]?.location?.coordinates; 
-              if (wLoc) {
-                  p._distance = calculateDistance(userLat, userLng, wLoc[1], wLoc[0]);
-              } else {
-                  p._distance = Infinity;
-              }
-          });
-          
-          allProducts.sort((a, b) => a._distance - b._distance);
+        const allProducts = await CatalogService.getProducts(filter, {
+          lean: true,
+          limit: 0,
+          sort: { createdAt: -1 },
+        });
 
-          const total = allProducts.length;
-          const skip = (Number(page) - 1) * Number(limit);
-          const paginated = allProducts.slice(skip, skip + Number(limit));
-          
-          return res.status(200).json({ items: paginated, total });
+        allProducts.forEach((p) => {
+          const wLoc = p.warehouses?.[0]?.location?.coordinates;
+          if (wLoc) {
+            p._distance = calculateDistance(userLat, userLng, wLoc[1], wLoc[0]);
+          } else {
+            p._distance = Infinity;
+          }
+        });
+
+        allProducts.sort((a, b) => a._distance - b._distance);
+
+        const total = allProducts.length;
+        const skip = (Number(page) - 1) * Number(limit);
+        const paginated = allProducts.slice(skip, skip + Number(limit));
+
+        return res.status(200).json({ items: paginated, total });
       }
 
       // --- B. STANDARD SORT (DB Level) ---
-      let sortOption = { createdAt: -1 }; 
+      let sortOption = { createdAt: -1 };
       if (sort) {
-        if (sort === 'newest') sortOption = { createdAt: -1 };
-        else if (sort === 'oldest') sortOption = { createdAt: 1 };
-        else if (sort === 'price_asc') sortOption = { price: 1 };
-        else if (sort === 'price_desc') sortOption = { price: -1 };
-        else if (sort.includes(':')) {
-             const [field, order] = sort.split(':');
-             sortOption = { [field]: order === 'desc' ? -1 : 1 };
+        if (sort === "newest") sortOption = { createdAt: -1 };
+        else if (sort === "oldest") sortOption = { createdAt: 1 };
+        else if (sort === "price_asc") sortOption = { price: 1 };
+        else if (sort === "price_desc") sortOption = { price: -1 };
+        else if (sort.includes(":")) {
+          const [field, order] = sort.split(":");
+          sortOption = { [field]: order === "desc" ? -1 : 1 };
         }
       }
 
       const skip = (Number(page) - 1) * Number(limit);
 
-      const products = await CatalogService.getProducts(filter, { 
-        lean: true, 
-        limit: Number(limit), 
-        skip, 
-        sort: sortOption 
+      const products = await CatalogService.getProducts(filter, {
+        lean: true,
+        limit: Number(limit),
+        skip,
+        sort: sortOption,
       });
 
       const total = await ProductModel.countDocuments(filter);

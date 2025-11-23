@@ -56,9 +56,9 @@ export default function CustomerNavbar() {
   const [suggestions, setSuggestions] = useState([]);
   const searchRef = useRef(null);
   const initialSyncRef = useRef(true);
-  
+
   // --- NEW STATE: Track focus to control visibility ---
-  const [isSearchFocused, setIsSearchFocused] = useState(false); 
+  const [isSearchFocused, setIsSearchFocused] = useState(false);
   // ----------------------------------------------------
 
   const [isAddressModalOpen, setIsAddressModalOpen] = useState(false);
@@ -95,9 +95,9 @@ export default function CustomerNavbar() {
 
         const res = await fetch(`/api/products?${params.toString()}`);
         const data = await res.json();
-        
+
         // CRITICAL: Only update the array. Visibility is controlled by isSearchFocused.
-        setSuggestions(data.items || []); 
+        setSuggestions(data.items || []);
       } catch (error) {
         console.error("Autocomplete error", error);
       }
@@ -219,11 +219,11 @@ export default function CustomerNavbar() {
   // --- FIX: Logic to only set searchQuery once from URL on initial load ---
   useEffect(() => {
     if (router.isReady && initialSyncRef.current) {
-        if (router.query.q) {
-            setSearchQuery(router.query.q);
-        }
-        // IMPORTANT: Set ref to false so subsequent URL changes don't auto-set searchQuery
-        initialSyncRef.current = false; 
+      if (router.query.q) {
+        setSearchQuery(router.query.q);
+      }
+      // IMPORTANT: Set ref to false so subsequent URL changes don't auto-set searchQuery
+      initialSyncRef.current = false;
     }
   }, [router.isReady, router.query.q]);
 
@@ -326,13 +326,13 @@ export default function CustomerNavbar() {
 
   const categories = ["Men", "Women", "Girls", "Boys"];
   const items = [
-    "Shirts",
-    "T-shirts",
-    "Hoodies",
-    "Sweatshirts",
-    "Jeans",
-    "Shorts",
-    "Tracks",
+    "Shirt",
+    "T-shirt",
+    "Hoodie",
+    "Sweatshirt",
+    "Jean",
+    "Short",
+    "Track",
   ];
 
   const CheckoutAwareLink = ({
@@ -454,7 +454,7 @@ export default function CustomerNavbar() {
               onFocus={() => setIsSearchFocused(true)}
               onBlur={() => {
                 // Delay blur to allow time for suggestion click event to register
-                setTimeout(() => setIsSearchFocused(false), 150); 
+                setTimeout(() => setIsSearchFocused(false), 150);
               }}
               onKeyDown={(e) => e.key === "Enter" && handleSearchSubmit()}
             />
