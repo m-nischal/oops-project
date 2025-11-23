@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/router";
-import { Clock, Package, RefreshCw, Search, CheckCircle } from "lucide-react";
+import { Clock, Package, RefreshCw, Search, CheckCircle, LogOut } from "lucide-react";
 
 import DeliveryLogin from "../../components/DeliveryLogin";
 import OrderRequests from "../../components/OrderRequests"; 
@@ -225,8 +225,16 @@ export default function AssignedPage() {
               id: selected.id,
               restaurantName: selected.pickup?.name,
               restaurantAddress: selected.pickup?.address,
+              // --- ADD THESE LINES ---
+              restaurantLat: selected.pickup?.lat, 
+              restaurantLng: selected.pickup?.lng, 
+              // -----------------------
               customerName: selected.dropoff?.name,
               customerAddress: selected.dropoff?.address,
+              // --- ADD THESE LINES ---
+              customerLat: selected.dropoff?.lat,
+              customerLng: selected.dropoff?.lng,
+              // -----------------------
               customerPhone: selected.dropoff?.phone,
               items: selected.items ?? [],
               total: selected.total ?? 0,
@@ -235,7 +243,7 @@ export default function AssignedPage() {
               externalOrderId: selected.externalOrderId,
               estimatedEarnings: selected.estimatedEarnings || 0,
               pickupTime: selected.pickupTime || "ASAP",
-            }}
+            }}  
             onBack={() => setSelected(null)}
             onPickup={() => pickupOrder(selected.id)}
             onStartDelivery={() => startDelivery(selected.id)}
@@ -249,6 +257,17 @@ export default function AssignedPage() {
       </div>
     );
   }
+
+  const handleLogout = async () => {
+    try {
+      await fetch("/api/auth/logout", { method: "POST" });
+      localStorage.removeItem("token"); // Clear client token
+      router.replace("/delivery/login"); // Redirect to login
+    } catch (err) {
+      console.error("Logout failed", err);
+      router.replace("/delivery/login");
+    }
+  };
 
   // -------------------------------
   // RENDER: MAIN DASHBOARD
@@ -278,6 +297,17 @@ export default function AssignedPage() {
             <RefreshCw className={`size-4 ${loading ? "animate-spin" : ""}`} />
             {loading ? "Refreshing" : "Refresh"}
           </button>
+
+          {/* --- NEW LOGOUT BUTTON --- */}
+          <button
+            onClick={handleLogout}
+            className="px-4 py-2 bg-red-50 text-red-600 border border-red-200 rounded-lg text-sm font-medium flex items-center gap-2 hover:bg-red-100 transition-colors"
+            title="Log Out"
+          >
+            <LogOut className="size-4" />
+            <span className="hidden sm:inline">Logout</span>
+          </button>
+          {/* ------------------------- */}
         </div>
       </div>
 

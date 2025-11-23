@@ -9,10 +9,11 @@ export default function ActiveDeliveries({ orders, onSelectOrder }) {
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
       {orders.map((order) => {
-        const isPickedUp = order.status === 'picked-up' || order.status === 'PICKED_UP';
+        // Check for ANY status that implies pickup is completed
+const isPickedUp = ['PICKED_UP', 'OUT_FOR_DELIVERY', 'DELIVERED', 'IN_TRANSIT'].includes((order.status || '').toUpperCase());
         
         // Data fallbacks
-        const restaurantName = order.restaurantName || order.pickup?.name || "Restaurant";
+        const restaurantName = order.restaurantName || order.pickup?.name || "Seller warehouse";
         const restaurantAddress = order.restaurantAddress || order.pickup?.address || "Address not available";
         const customerName = order.customerName || order.dropoff?.name || "Customer";
         const customerAddress = order.customerAddress || order.dropoff?.address || "Address not available";
@@ -30,7 +31,7 @@ export default function ActiveDeliveries({ orders, onSelectOrder }) {
               <span className={`text-[10px] font-bold px-3 py-1 rounded-full tracking-wide uppercase ${
                 isPickedUp ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-600'
               }`}>
-                {isPickedUp ? 'In Transit' : 'Pickup'}
+                {isPickedUp ? 'order picked up' : 'Pickup'}
               </span>
             </div>
 

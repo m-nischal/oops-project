@@ -197,8 +197,12 @@ export default function DeliveryDetailPage() {
     id: delivery._id ?? delivery.id,
     restaurantName: delivery.pickup?.name || delivery.merchantName,
     restaurantAddress: delivery.pickup?.address,
+    restaurantLat: delivery.pickup?.lat,
+    restaurantLng: delivery.pickup?.lng,
     customerName: delivery.dropoff?.name,
     customerAddress: delivery.dropoff?.address,
+    customerLat: delivery.dropoff?.lat,
+    customerLng: delivery.dropoff?.lng,
     customerPhone: delivery.dropoff?.phone,
     items: delivery.items?.map((it) => (typeof it === 'string' ? it : it.name)) || [],
     

@@ -58,7 +58,7 @@ export default function OrderRequests({ orders, onAccept, onDecline }) {
             </div> */}
             <div>
               <p className="text-[10px] text-gray-400 uppercase font-bold mb-1">TOTAL</p>
-              <p className="font-semibold text-gray-900">${(order.total || 0).toFixed(2)}</p>
+              <p className="font-semibold text-gray-900">₹{(order.total || 0).toFixed(2)}</p>
             </div>
             {/* <div>
               <p className="text-[10px] text-gray-400 uppercase font-bold mb-1">EARNINGS</p>

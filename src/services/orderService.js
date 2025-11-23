@@ -342,28 +342,57 @@ export default class OrderService {
         order.fulfillment = order.fulfillment || {};
         order.fulfillment.shippedAt = now;
         
-        const isB2B = !!order.userId; 
-        const fromType = isB2B ? "WHOLESALER" : "RETAILER";
-        const toType = isB2B ? "RETAILER" : "CUSTOMER";
-        
         const existingDelivery = await Delivery.findOne({ orderRef: order._id }).session(session);
         
         if (!existingDelivery) {
+            // 1. FETCH THE SELLER to determine if they are a Retailer or Wholesaler
+            const seller = await User.findById(order.sellerId).session(session);
+            
+            // 2. DETERMINE DELIVERY TYPE based on Role
+            // If seller is Wholesaler -> It's B2B (Wholesaler to Retailer)
+            // If seller is Retailer -> It's B2C (Retailer to Customer)
+            const fromType = (seller.role === "WHOLESALER") ? "WHOLESALER" : "RETAILER";
+            const toType = (fromType === "WHOLESALER") ? "RETAILER" : "CUSTOMER";
+
+            // 3. SMART ADDRESS FINDER
+            // Search for the correct address label based on who is selling.
+            // Retailers usually name their pickup point "Store", Wholesalers use "Warehouse".
+            let sellerAddr = seller?.addresses?.find(addr => 
+                addr.label && (addr.label.toLowerCase() === "store" || addr.label.toLowerCase() === "warehouse")
+            );
+
+            // Fallback: If no specific label matches, just take the first available address.
+            if (!sellerAddr && seller?.addresses?.length > 0) {
+                sellerAddr = seller.addresses[0];
+            }
+
+            // 4. CREATE DELIVERY with Real Data
             await Delivery.create([{
                 orderRef: order._id,
                 externalOrderId: order._id.toString(),
                 fromType: fromType, 
                 toType: toType,     
+                
                 pickup: { 
-                    address: "Seller Warehouse", 
-                    name: "Seller Store"
+                    address: sellerAddr 
+                        ? `${sellerAddr.addressLine1}, ${sellerAddr.city} - ${sellerAddr.pincode}` 
+                        : "Address not found",
+                    name: seller?.name || seller?.label || "Seller Location",
+                    // CRITICAL: Save coordinates for the map redirect
+                    lat: sellerAddr?.location?.coordinates?.[1],
+                    lng: sellerAddr?.location?.coordinates?.[0]
                 },
+
                 dropoff: {
                     name: order.customer.name,
                     phone: order.customer.phone,
                     email: order.customer.email,
-                    address: order.customer.address
+                    address: order.customer.address,
+                    // Optional: Pass customer lat/lng if you have it in the order object
+                    lat: order.customer.customerLocation?.lat,
+                    lng: order.customer.customerLocation?.lng
                 },
+                
                 status: "PENDING", 
                 notes: "Auto-generated from Order Shipped status",
                 deliveryFee: (order.total || 0) * 0.05,
