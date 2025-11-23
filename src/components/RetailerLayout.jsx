@@ -17,13 +17,14 @@ import {
   Package,
   ShoppingCart,
   Bell,
-  Search,
   Store,
   ShoppingBag,
   Warehouse,
   User, 
   Settings,
-  History // Imported History Icon
+  History,
+  Calculator,
+  Calendar
 } from "lucide-react";
 
 function NavLink({ href, icon: Icon, children }) {
@@ -52,9 +53,8 @@ export default function RetailerLayout({ children }) {
     try {
         await fetch("/api/auth/logout", { method: "POST" });
         localStorage.removeItem("token"); 
-        router.push("/login"); 
+        router.push("/"); 
     } catch (e) {
-        console.error(e);
         router.push("/login");
     }
   };
@@ -74,9 +74,22 @@ export default function RetailerLayout({ children }) {
           <NavLink href="/retailer/dashboard" icon={LayoutDashboard}>
             DASHBOARD
           </NavLink>
+          
+          <div className="px-2 text-xs font-semibold text-gray-400 tracking-wider mt-2">TOOLS</div>
+          
+          <NavLink href="/retailer/pos" icon={Calculator}>
+            POS / OFFLINE SALE
+          </NavLink>
+          
+          <NavLink href="/retailer/calendar" icon={Calendar}>
+            CALENDAR & TASKS
+          </NavLink>
+
           <Separator className="bg-gray-700" />
+          
+          <div className="px-2 text-xs font-semibold text-gray-400 tracking-wider">MY SHOP</div>
           <NavLink href="/retailer/products" icon={Package}>
-            MY SHOP (LIVE)
+            LIVE PRODUCTS
           </NavLink>
           <NavLink href="/retailer/inventory" icon={Warehouse}>
             INVENTORY
@@ -84,12 +97,12 @@ export default function RetailerLayout({ children }) {
           <NavLink href="/retailer/orders" icon={ShoppingCart}>
             CUSTOMER ORDERS
           </NavLink>
+          
           <Separator className="bg-gray-700" />
           <div className="px-2 text-xs font-semibold text-gray-400 tracking-wider">WHOLESALE MARKET</div>
           <NavLink href="/retailer/stock" icon={ShoppingBag}>
             BROWSE & STOCK
           </NavLink>
-          {/* NEW LINK */}
           <NavLink href="/retailer/purchases" icon={History}>
             PURCHASE HISTORY
           </NavLink>
@@ -98,10 +111,9 @@ export default function RetailerLayout({ children }) {
       
       {/* Main Content */}
       <div className="flex flex-col ml-[250px]">
-        <header className="flex h-[60px] items-center gap-4 border-b bg-white px-6 sticky top-0 z-30">
-          <div className="flex-1">
-            <Search className="h-4 w-4 text-gray-500" />
-          </div>
+        <header className="flex h-[60px] items-center gap-4 border-b bg-white px-6 sticky top-0 z-30 justify-end">
+          {/* Removed Search Bar div here */}
+          
           <Button variant="ghost" size="icon" className="rounded-full">
             <Bell className="h-4 w-4" />
           </Button>
@@ -109,7 +121,7 @@ export default function RetailerLayout({ children }) {
             <DropdownMenuTrigger asChild>
               <Button variant="ghost" size="icon" className="rounded-full">
                 <Avatar className="h-8 w-8">
-                  <AvatarImage src="/path-to-avatar.png" alt="Admin" />
+                  <AvatarImage src="/path-to-avatar.png" alt="User" />
                   <AvatarFallback>R</AvatarFallback>
                 </Avatar>
               </Button>

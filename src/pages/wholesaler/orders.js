@@ -1,4 +1,3 @@
-// src/pages/wholesaler/orders.js
 import React, { useEffect, useState } from 'react';
 import { useRouter } from 'next/router';
 import WholesalerLayout from '../../components/WholesalerLayout';
@@ -42,19 +41,16 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { AlertTriangle, Loader2 } from "lucide-react";
+import { AlertTriangle, Loader2, Package, User, DollarSign } from "lucide-react";
 import { Button } from '@/components/ui/button';
 
 // Helper to format currency
 const formatPrice = (p) => `₹${Number(p || 0).toLocaleString('en-IN')}`;
 
-// --- MODIFIED: Removed delivery stages from manual selection ---
 const settableStatuses = [
-  "processing", "shipped", "cancelled"
+  "processing", "shipped", "out_for_delivery", "delivered", "cancelled"
 ];
-
-// --- MODIFIED: Added out_for_delivery to final statuses to prevent editing once shipped/picked up ---
-const finalStatuses = ["out_for_delivery", "delivered", "cancelled", "refunded"];
+const finalStatuses = ["delivered", "cancelled", "refunded"];
 const ORDERS_PER_PAGE = 10;
 
 export default function WholesalerOrdersPage() {
@@ -67,8 +63,12 @@ export default function WholesalerOrdersPage() {
   const [totalOrders, setTotalOrders] = useState(0);
   const [updatingStatus, setUpdatingStatus] = useState(null);
 
-  // Analytics Modal State
-  const [isModalOpen, setIsModalOpen] = useState(false);
+  // --- NEW: Order Details Modal State ---
+  const [isDetailsModalOpen, setIsDetailsModalOpen] = useState(false);
+  const [selectedOrderDetails, setSelectedOrderDetails] = useState(null);
+
+  // Analytics Modal State (Existing)
+  const [isAnalyticsModalOpen, setIsAnalyticsModalOpen] = useState(false);
   const [selectedRetailerEmail, setSelectedRetailerEmail] = useState(null);
   const [analyticsData, setAnalyticsData] = useState(null);
   const [isModalLoading, setIsModalLoading] = useState(false);
@@ -152,11 +152,42 @@ export default function WholesalerOrdersPage() {
     }
   };
 
-  // Open modal and fetch analytics
+  // --- NEW: Handle opening order details modal ---
+  const handleOrderClick = async (order) => {
+    if (!order || !order._id) return;
+    setIsDetailsModalOpen(true);
+    setSelectedOrderDetails(null); // Clear previous details
+    setIsModalLoading(true);
+    setError(null);
+
+    try {
+        const token = localStorage.getItem("token");
+        // Use the general order API endpoint as it returns full order data
+        const res = await fetch(`/api/orders/${order._id}`, {
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
+
+        if (!res.ok) {
+             const errData = await res.json();
+             throw new Error(errData.error || 'Failed to fetch order details');
+        }
+        const data = await res.json();
+        setSelectedOrderDetails(data);
+    } catch (err) {
+        console.error(err);
+        setError(err.message);
+        setSelectedOrderDetails(order); // Fallback to basic data
+    } finally {
+        setIsModalLoading(false);
+    }
+  };
+  // --- END NEW ---
+
+  // Open modal and fetch analytics (Existing logic updated to use new modal state)
   const handleRetailerClick = async (retailerEmail) => {
     if (!retailerEmail) return;
     
-    setIsModalOpen(true);
+    setIsAnalyticsModalOpen(true);
     setIsModalLoading(true);
     setSelectedRetailerEmail(retailerEmail);
     setAnalyticsData(null); 
@@ -197,7 +228,7 @@ export default function WholesalerOrdersPage() {
         <CardHeader>
           <CardTitle>Orders List</CardTitle>
           <CardDescription>
-            Here are all the orders placed by retailers.
+            Here are all the wholesale orders placed by retailers.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -207,7 +238,7 @@ export default function WholesalerOrdersPage() {
             </div>
           )}
           
-          {error && !isModalOpen && (
+          {error && !isAnalyticsModalOpen && (
             <Alert variant="destructive" className="mb-6">
               <AlertTriangle className="h-4 w-4" />
               <AlertTitle>Error</AlertTitle>
@@ -220,8 +251,8 @@ export default function WholesalerOrdersPage() {
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead>Order ID</TableHead>
-                    <TableHead>Retailer</TableHead> {/* RENAMED */}
+                    <TableHead>Order ID</TableHead> {/* MADE CLICKABLE FOR DETAILS */}
+                    <TableHead>Retailer</TableHead> {/* MADE CLICKABLE FOR ANALYTICS */}
                     <TableHead>Date</TableHead>
                     <TableHead>Status</TableHead>
                     <TableHead>Update Status</TableHead>
@@ -232,12 +263,23 @@ export default function WholesalerOrdersPage() {
                   {orders.length > 0 ? (
                     orders.map(order => (
                       <TableRow key={order._id}>
-                        <TableCell className="font-medium">#{order._id.slice(-6)}</TableCell>
-                        <TableCell>
+                        <TableCell className="font-medium">
+                          {/* --- CLICKABLE ORDER ID --- */}
                           <Button
                             variant="link"
-                            className="p-0 h-auto"
+                            className="p-0 h-auto text-sm font-semibold"
+                            onClick={() => handleOrderClick(order)}
+                          >
+                            #{order._id.slice(-6)}
+                          </Button>
+                        </TableCell>
+                        <TableCell>
+                           {/* --- CLICKABLE RETAILER NAME FOR ANALYTICS --- */}
+                          <Button
+                            variant="link"
+                            className="p-0 h-auto text-sm"
                             onClick={() => handleRetailerClick(order.customer?.email)}
+                            title={`View retailer analytics for ${order.customer?.name}`}
                           >
                             {order.customer?.name}
                           </Button>
@@ -267,12 +309,6 @@ export default function WholesalerOrdersPage() {
                                 <SelectValue placeholder="Change status..." />
                               </SelectTrigger>
                               <SelectContent>
-                                {/* Always show current status even if locked/hidden from choices */}
-                                {!settableStatuses.includes(order.status) && (
-                                   <SelectItem value={order.status} disabled>
-                                     {order.status.charAt(0).toUpperCase() + order.status.slice(1).replace(/_/g, ' ')}
-                                   </SelectItem>
-                                )}
                                 {settableStatuses.map(status => (
                                   <SelectItem key={status} value={status}>
                                     {status.charAt(0).toUpperCase() + status.slice(1)}
@@ -324,19 +360,31 @@ export default function WholesalerOrdersPage() {
         </CardContent>
       </Card>
       
+      {/* Existing Analytics Modal */}
       <RetailerAnalyticsModal
-        isOpen={isModalOpen}
-        onClose={() => setIsModalOpen(false)}
+        isOpen={isAnalyticsModalOpen}
+        onClose={() => { setIsAnalyticsModalOpen(false); setError(null); }}
         isLoading={isModalLoading}
         data={analyticsData}
-        error={isModalOpen ? error : null}
+        error={isAnalyticsModalOpen ? error : null}
+      />
+
+      {/* --- NEW: Order Details Modal --- */}
+      <OrderDetailsModal
+        isOpen={isDetailsModalOpen}
+        onClose={() => { setIsDetailsModalOpen(false); setError(null); }}
+        isLoading={isModalLoading}
+        order={selectedOrderDetails}
+        error={isDetailsModalOpen ? error : null}
       />
     </WholesalerLayout>
   );
 }
 
+// Existing Retailer Analytics Modal
 function RetailerAnalyticsModal({ isOpen, onClose, isLoading, data, error }) {
   const formatPrice = (p) => `₹${Number(p || 0).toLocaleString('en-IN')}`;
+  const finalStatuses = ["delivered", "cancelled", "refunded"];
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
@@ -400,7 +448,7 @@ function RetailerAnalyticsModal({ isOpen, onClose, isLoading, data, error }) {
                     <TableRow key={order._id}>
                       <TableCell className="font-medium">#{order._id.slice(-6)}</TableCell>
                       <TableCell>
-                        <Badge variant={["delivered", "cancelled", "refunded"].includes(order.status) ? 'default' : 'secondary'}>
+                        <Badge variant={finalStatuses.includes(order.status) ? 'default' : 'secondary'}>
                           {order.status}
                         </Badge>
                       </TableCell>
@@ -413,6 +461,135 @@ function RetailerAnalyticsModal({ isOpen, onClose, isLoading, data, error }) {
           </div>
         )}
         
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// --- NEW COMPONENT: Order Details Modal (Reused from Retailer, with slight context change) ---
+function OrderDetailsModal({ isOpen, onClose, isLoading, order, error }) {
+  const formatPrice = (p) => `₹${Number(p || 0).toLocaleString('en-IN')}`;
+  const formatDate = (d) => d ? new Date(d).toLocaleString() : 'N/A';
+  
+  if (!order) return null;
+
+  // For Wholesaler, the customer is the Retailer (buyer)
+  const isRetailerOrder = order.userId ? true : false;
+  const CustomerIcon = isRetailerOrder ? User : User; // Use User icon for consistency
+
+  return (
+    <Dialog open={isOpen} onOpenChange={onClose}>
+      <DialogContent className="sm:max-w-[800px] max-h-[90vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle>Order Details #{order._id?.slice(-6)}</DialogTitle>
+          <DialogDescription>
+            Detailed view of the order placed by {order.customer?.name}.
+          </DialogDescription>
+        </DialogHeader>
+
+        {isLoading && (
+          <div className="flex justify-center items-center py-10">
+            <Loader2 className="h-8 w-8 animate-spin" />
+          </div>
+        )}
+        
+        {error && (
+          <Alert variant="destructive">
+            <AlertTriangle className="h-4 w-4" />
+            <AlertTitle>Error</AlertTitle>
+            <AlertDescription>{error}</AlertDescription>
+          </Alert>
+        )}
+
+        {!isLoading && order && (
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 pt-4">
+            
+            {/* Customer Info */}
+            <Card className="col-span-1 border-dashed">
+              <CardHeader className="pb-3">
+                <CardTitle className="text-lg flex items-center"><CustomerIcon className="h-4 w-4 mr-2"/>{isRetailerOrder ? 'Retailer Info (Buyer)' : 'Customer Info'}</CardTitle>
+              </CardHeader>
+              <CardContent className="text-sm space-y-1">
+                <p><strong>Name:</strong> {order.customer?.name}</p>
+                <p><strong>Email:</strong> {order.customer?.email || 'N/A'}</p>
+                <p><strong>Phone:</strong> {order.customer?.phone || 'N/A'}</p>
+                <p><strong>Address:</strong> {order.customer?.address || 'N/A'}</p>
+              </CardContent>
+            </Card>
+
+            {/* Financial Summary */}
+            <Card className="col-span-1 border-dashed">
+              <CardHeader className="pb-3">
+                <CardTitle className="text-lg flex items-center"><DollarSign className="h-4 w-4 mr-2"/>Summary</CardTitle>
+              </CardHeader>
+              <CardContent className="text-sm space-y-1">
+                <p><strong>Status:</strong> <Badge className="ml-1">{order.status}</Badge></p>
+                <p><strong>Placed:</strong> {formatDate(order.createdAt)}</p>
+                <p><strong>Subtotal:</strong> {formatPrice(order.subtotal)}</p>
+                <p><strong>Total:</strong> <span className="font-bold">{formatPrice(order.total)}</span></p>
+              </CardContent>
+            </Card>
+            
+            {/* Delivery/Fulfillment */}
+             <Card className="col-span-1 border-dashed">
+              <CardHeader className="pb-3">
+                <CardTitle className="text-lg flex items-center"><Package className="h-4 w-4 mr-2"/>Delivery</CardTitle>
+              </CardHeader>
+              <CardContent className="text-sm space-y-1">
+                <p><strong>ETA:</strong> {formatDate(order.estimatedDelivery)}</p>
+                <p><strong>Shipped At:</strong> {formatDate(order.shippedAt)}</p>
+                <p><strong>Delivered At:</strong> {formatDate(order.deliveredAt)}</p>
+                <p><strong>Tracking:</strong> {order.fulfillment?.trackingNumber || 'N/A'}</p>
+              </CardContent>
+            </Card>
+
+
+            {/* Items Table */}
+            <div className="col-span-full">
+              <h4 className="font-semibold mb-2">Items Ordered ({order.items?.length || 0})</h4>
+              <div className="border rounded-lg overflow-hidden">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Product</TableHead>
+                      <TableHead>Size</TableHead>
+                      <TableHead className="text-right">Unit Price</TableHead>
+                      <TableHead className="text-right">Qty</TableHead>
+                      <TableHead className="text-right">Subtotal</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {order.items?.map((item, index) => (
+                      <TableRow key={index}>
+                        <TableCell className="font-medium">{item.name}</TableCell>
+                        <TableCell>{item.sizeLabel}</TableCell>
+                        <TableCell className="text-right">{formatPrice(item.unitPrice)}</TableCell>
+                        <TableCell className="text-right">{item.qty}</TableCell>
+                        <TableCell className="text-right font-semibold">{formatPrice(item.subtotal)}</TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            </div>
+            
+            {/* Status History */}
+            <div className="col-span-full">
+                <h4 className="font-semibold mb-2">Status History</h4>
+                <ol className="relative border-l border-gray-200 ml-3">
+                    {order.statusHistory?.map((history, index) => (
+                        <li className="mb-4 ml-4" key={index}>
+                            <div className="absolute w-3 h-3 bg-gray-400 rounded-full mt-1.5 -left-1.5 border border-white"></div>
+                            <time className="mb-1 text-xs font-normal leading-none text-gray-400">{formatDate(history.at)}</time>
+                            <h3 className="text-sm font-semibold text-gray-900 capitalize">{history.status}</h3>
+                            <p className="text-xs text-gray-500">{history.note}</p>
+                        </li>
+                    )).reverse()} {/* Show latest status first */}
+                </ol>
+            </div>
+
+          </div>
+        )}
       </DialogContent>
     </Dialog>
   );
