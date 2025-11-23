@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/router";
-import { Clock, Package, RefreshCw, Search } from "lucide-react";
+import { Clock, Package, RefreshCw, Search, CheckCircle } from "lucide-react";
 
 import DeliveryLogin from "../../components/DeliveryLogin";
 import OrderRequests from "../../components/OrderRequests"; 
@@ -13,6 +13,7 @@ export default function AssignedPage() {
   // UI State
   const [activeTab, setActiveTab] = useState("requests");
   const [searchQuery, setSearchQuery] = useState("");
+  const [showSuccessModal, setShowSuccessModal] = useState(false); // <--- NEW STATE
 
   // Data State
   const [deliveries, setDeliveries] = useState([]);
@@ -147,7 +148,6 @@ export default function AssignedPage() {
     }
   };
 
-  // --- NEW: Handle "Start Delivery" (Out for delivery) ---
   const startDelivery = async (id) => {
     try {
       const updated = await apiPost(`/api/delivery/${id}/status`, {
@@ -157,7 +157,7 @@ export default function AssignedPage() {
       setDeliveries((cur) =>
         cur.map((o) => (o.id === id ? updated : o))
       );
-      setSelected(updated); // Update selected so UI refreshes to show "Complete"
+      setSelected(updated);
     } catch (err) {
       alert("Start delivery failed: " + err.message);
     }
@@ -173,7 +173,9 @@ export default function AssignedPage() {
       // Remove from active list upon success
       setDeliveries((cur) => cur.filter((o) => o.id !== id));
       setSelected(null);
-      alert("Delivery Verified & Completed!");
+      
+      // Show Success Modal instead of alert
+      setShowSuccessModal(true); 
     } catch (err) {
       alert("Delivery failed: " + err.message);
     }
@@ -236,7 +238,7 @@ export default function AssignedPage() {
             }}
             onBack={() => setSelected(null)}
             onPickup={() => pickupOrder(selected.id)}
-            onStartDelivery={() => startDelivery(selected.id)} // <--- THIS FIXED THE ERROR
+            onStartDelivery={() => startDelivery(selected.id)}
             onDeliver={(otp) => deliverOrder(selected.id, otp)}
             onCancel={() => {
               declineOrder(selected.id);
@@ -312,9 +314,13 @@ export default function AssignedPage() {
             <Package className="size-4" />
             Active Deliveries
             {activeRequests.length > 0 && (
-              <span className={`text-xs px-2 py-0.5 rounded-full ml-1 ${
-                  activeTab === "active" ? "bg-white text-black" : "bg-blue-100 text-blue-600"
-              }`}>
+              <span
+                className={`text-xs px-2 py-0.5 rounded-full ml-1 ${
+                  activeTab === "active"
+                    ? "bg-white text-black"
+                    : "bg-blue-100 text-blue-600"
+                }`}
+              >
                 {activeRequests.length}
               </span>
             )}
@@ -339,6 +345,31 @@ export default function AssignedPage() {
           )}
         </div>
       </div>
+
+      {/* --- SUCCESS POPUP MODAL --- */}
+      {showSuccessModal && (
+        <div className="fixed inset-0 bg-black/80 z-[100] flex items-center justify-center p-6 backdrop-blur-md">
+          <div className="bg-white rounded-[32px] w-full max-w-sm p-8 text-center shadow-2xl animate-in fade-in zoom-in-95 duration-300">
+            <div className="w-20 h-20 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-6">
+              <CheckCircle className="w-10 h-10 text-green-600" />
+            </div>
+            
+            <h2 className="text-2xl font-black text-gray-900 mb-2 tracking-tight">
+              Delivery Complete!
+            </h2>
+            <p className="text-gray-500 mb-8">
+              Great job! The order has been successfully verified and delivered.
+            </p>
+
+            <button
+              onClick={() => setShowSuccessModal(false)}
+              className="w-full py-4 rounded-xl bg-black text-white font-bold text-lg hover:scale-[1.02] active:scale-[0.98] transition-all shadow-xl shadow-gray-200"
+            >
+              Done
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
-} 
+}

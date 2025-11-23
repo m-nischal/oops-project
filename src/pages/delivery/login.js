@@ -1,11 +1,12 @@
-// /mnt/data/oops-project/src/pages/delivery/login.js
 import { useState } from "react";
 import { useRouter } from "next/router";
 import Link from "next/link";
+import { Mail, Lock, Eye, EyeOff, ArrowRight, Loader2 } from "lucide-react";
 
 export default function DeliveryLoginPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const router = useRouter();
@@ -30,6 +31,7 @@ export default function DeliveryLoginPage() {
       }
       // preserve legacy token if returned
       if (data.token) try { localStorage.setItem("token", data.token); } catch (_) {}
+      
       // get role from token or user object
       let role = null;
       if (data.token) {
@@ -39,58 +41,78 @@ export default function DeliveryLoginPage() {
         } catch (e) {}
       }
       if (!role && data.user?.role) role = data.user.role.toUpperCase();
+      
       if (role === "DELIVERY") {
         router.replace("/delivery/assigned");
       } else {
         setError("This account is not a Delivery Partner.");
+        setLoading(false);
       }
     } catch (err) {
       console.error(err);
       setError("Network error");
-    } finally {
       setLoading(false);
     }
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 flex items-center justify-center px-4 py-12">
-      <div className="w-full max-w-md bg-white rounded-2xl shadow-lg p-8">
-        <div className="text-center mb-6">
-          <h1 className="text-2xl font-semibold tracking-tight">Delivery Partner Login</h1>
-          <p className="text-sm text-gray-500 mt-1">Sign in to view and manage your assigned deliveries</p>
+    <div className="w-full min-h-screen flex items-center justify-center p-6 bg-gradient-to-br from-blue-50 via-white to-gray-100">
+      <div className="w-full max-w-md bg-white/70 backdrop-blur-2xl p-8 rounded-[32px] shadow-xl border border-white/50">
+        
+        <div className="text-center mb-10">
+          <h1 className="text-3xl font-black tracking-tighter text-gray-900 mb-2">
+            Partner Login
+          </h1>
+          <p className="text-gray-500 text-sm">Sign in to manage your deliveries</p>
         </div>
 
-        <form onSubmit={onSubmit} className="space-y-4" aria-label="Delivery login form">
-          <label className="block">
-            <span className="text-xs font-medium text-gray-700">Email</span>
-            <input
-              type="email"
-              name="email"
-              autoComplete="email"
-              required
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              className="mt-2 block w-full rounded-xl border px-4 py-2 focus:outline-none focus:ring-2 focus:ring-black"
-              placeholder="you@company.com"
-            />
-          </label>
+        <form onSubmit={onSubmit} className="space-y-5">
+          {/* Email Input */}
+          <div className="space-y-2">
+            <label className="text-xs font-bold text-gray-500 uppercase tracking-wider ml-1">Email</label>
+            <div className="relative">
+              <Mail className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 h-5 w-5" />
+              <input
+                type="email"
+                name="email"
+                autoComplete="email"
+                required
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="you@company.com"
+                className="w-full h-14 pl-12 pr-4 rounded-2xl bg-white border border-gray-200 text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-black/10 focus:border-black transition-all"
+              />
+            </div>
+          </div>
 
-          <label className="block">
-            <span className="text-xs font-medium text-gray-700">Password</span>
-            <input
-              type="password"
-              name="password"
-              autoComplete="current-password"
-              required
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              className="mt-2 block w-full rounded-xl border px-4 py-2 focus:outline-none focus:ring-2 focus:ring-black"
-              placeholder="••••••••"
-            />
-          </label>
+          {/* Password Input */}
+          <div className="space-y-2">
+            <label className="text-xs font-bold text-gray-500 uppercase tracking-wider ml-1">Password</label>
+            <div className="relative">
+              <Lock className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 h-5 w-5" />
+              <input
+                type={showPassword ? "text" : "password"}
+                name="password"
+                autoComplete="current-password"
+                required
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="••••••••"
+                className="w-full h-14 pl-12 pr-12 rounded-2xl bg-white border border-gray-200 text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-black/10 focus:border-black transition-all"
+              />
+              <button
+                type="button"
+                onClick={() => setShowPassword(!showPassword)}
+                className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 p-1"
+                tabIndex="-1"
+              >
+                {showPassword ? <EyeOff size={20} /> : <Eye size={20} />}
+              </button>
+            </div>
+          </div>
 
           {error && (
-            <div role="alert" className="text-sm text-red-600 mt-1">
+            <div className="p-3 rounded-xl bg-red-50 text-red-600 text-sm font-medium text-center">
               {error}
             </div>
           )}
@@ -98,17 +120,20 @@ export default function DeliveryLoginPage() {
           <button
             type="submit"
             disabled={loading}
-            className="w-full mt-2 py-3 rounded-xl bg-black text-white font-medium disabled:opacity-60"
+            className="w-full h-14 rounded-2xl bg-black text-white font-bold text-lg hover:bg-gray-900 active:scale-[0.98] transition-all shadow-lg shadow-gray-200 flex items-center justify-center gap-2 disabled:opacity-70 disabled:cursor-not-allowed"
           >
-            {loading ? "Signing in…" : "Sign in"}
+            {loading ? <Loader2 className="animate-spin" /> : "Sign In"}
+            {!loading && <ArrowRight size={20} />}
           </button>
         </form>
 
-        <div className="text-center mt-6 text-sm text-gray-500">
-          Don't have an account?{' '}
-          <Link href="/delivery/register" className="font-bold text-black hover:underline">
-            Register here
-          </Link>
+        <div className="text-center mt-8">
+          <p className="text-gray-500 text-sm">
+            Don't have an account?{' '}
+            <Link href="/delivery/register" className="font-bold text-black hover:underline">
+              Register here
+            </Link>
+          </p>
         </div>
       </div>
     </div>

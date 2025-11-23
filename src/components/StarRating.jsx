@@ -50,7 +50,8 @@ export default function StarRating({ rating = 0, reviewCount, className, starSiz
     <div className={cn("flex items-center gap-1 text-sm", className)}>
       {stars}
       <span className="text-sm font-semibold text-gray-700 ml-1">
-        {roundedRating}
+        {/* --- MODIFIED LOGIC HERE --- */}
+        {reviewCount === 0 ? '0/0' : roundedRating}
         {reviewCount !== undefined && (
           <span className="ml-1 font-normal text-gray-500">({reviewCount} reviews)</span>
         )}

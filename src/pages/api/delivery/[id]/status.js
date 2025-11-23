@@ -41,7 +41,7 @@ export default async function handler(req, res) {
     // --- STATUS LOGIC ---
 
     if (status === "PICKED_UP") {
-      delivery.status = "PICKED_UP"; // or "IN_TRANSIT" depending on your flow preferences
+      delivery.status = "PICKED_UP"; 
       delivery.timestamps.pickedAt = now;
       
       // Ensure OTP exists for the next step
@@ -97,14 +97,26 @@ export default async function handler(req, res) {
           });
         } catch (e) {
           console.warn("Failed to send OTP email:", e?.message || e);
-          // We don't return error here so the status update still succeeds even if email fails
         }
       }
     
     } else if (status === "DELIVERED") {
 
       if (delivery.status === "DELIVERED") {
-          return res.json({ ok: true, delivery });
+          // --- FIX: Ensure we populate orderRef even if returning early ---
+          await delivery.populate("orderRef");
+          const dObj = delivery.toObject();
+          const orderTotal = dObj.orderRef?.total || 0;
+
+          return res.json({ 
+              ok: true, 
+              delivery: {
+                  ...dObj,
+                  id: delivery._id,
+                  total: delivery.total || orderTotal || 0,
+                  estimatedEarnings: delivery.deliveryFee || delivery.earnings || 0
+              } 
+          });
       }
       // --- OTP VERIFICATION ---
       if (!otp) return res.status(400).json({ ok: false, error: "Delivery OTP is required" });
@@ -120,29 +132,25 @@ export default async function handler(req, res) {
       
       delivery.history.push({ status: "DELIVERED", by: session.user._id, note, at: now });
     }
-    // ... existing code ...
     
     await delivery.save();
 
-    // --- NEW: Sync status with Parent Order ---
+    // --- Sync status with Parent Order ---
     if (delivery.orderRef) {
       let orderStatus = null;
-      // Map Delivery status to Order status
       if (status === "OUT_FOR_DELIVERY") orderStatus = "out_for_delivery";
       if (status === "DELIVERED") orderStatus = "delivered";
 
       if (orderStatus) {
         try {
-          // Use OrderService to update the main order (handles timestamps, history, etc.)
           await OrderService.updateStatus(delivery.orderRef, orderStatus);
         } catch (syncErr) {
           console.error("Failed to sync order status:", syncErr);
-          // We don't throw here so the delivery update itself remains successful
         }
       }
     }
 
-    // --- NEW: Send Final Delivery Confirmation Email ---
+    // --- Send Final Delivery Confirmation Email ---
     if (status === "DELIVERED" && delivery.dropoff?.email) {
       try {
         await sendEmail({
@@ -179,12 +187,21 @@ export default async function handler(req, res) {
       }
     }
 
+    // --- CRITICAL FIX START: Populate orderRef to get the total price ---
+    // This ensures the frontend receives the 'total' field immediately after update
+    await delivery.populate("orderRef");
+    
+    const deliveryObj = delivery.toObject();
+    const orderTotal = deliveryObj.orderRef?.total || 0;
+    // --- CRITICAL FIX END ---
+
     return res.json({ 
-    // ... existing return ...
         ok: true, 
         delivery: {
-            ...delivery.toObject(),
+            ...deliveryObj,
             id: delivery._id,
+            // Use delivery.total if exists, otherwise fallback to populated order.total
+            total: delivery.total || orderTotal || 0,
             estimatedEarnings: delivery.deliveryFee || delivery.earnings || 0
         } 
     });

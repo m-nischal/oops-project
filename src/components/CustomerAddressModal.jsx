@@ -1,6 +1,6 @@
 // src/components/CustomerAddressModal.jsx
 import React, { useState, useMemo, useEffect, useRef, useCallback } from "react";
-import { MapPin, Check, Plus, Loader2, Save, LocateFixed, ArrowLeft, Info, RefreshCw, Search } from "lucide-react";
+import { MapPin, Check, Plus, Loader2, Save, LocateFixed, ArrowLeft, Info, RefreshCw, Search, Edit } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -34,35 +34,58 @@ const COUNTRY_DATA = [
 ].sort((a, b) => a.country.localeCompare(b.country));
 
 export default function CustomerAddressModal({ isOpen, onClose, addresses, onSelect, onAddressAdded }) {
-  const [mode, setMode] = useState("select"); // 'select', 'add', or 'check'
+  const [mode, setMode] = useState("select"); // 'select', 'add', 'edit'
   const [selectedId, setSelectedId] = useState(null);
+  const [editingAddress, setEditingAddress] = useState(null); // Holds address object for editing
 
-  const { isLoaded } = useLoadScript({
+  const { isLoaded, loadError } = useLoadScript({
     googleMapsApiKey: process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY,
     libraries: libraries,
   });
+  
+  // Resync selectedId when addresses update or modal opens
+  useEffect(() => {
+    // Attempt to select the currently active address if available in localStorage
+    const savedLoc = localStorage.getItem("livemart_active_location");
+    let currentId = null;
+    if (savedLoc) {
+        try {
+            const parsed = JSON.parse(savedLoc);
+            currentId = addresses.find(addr => 
+                addr.location?.coordinates?.[1] === parsed.lat &&
+                addr.location?.coordinates?.[0] === parsed.lng
+            )?._id;
+        } catch (e) { /* ignore */ }
+    }
+    
+    // Fallback to the first address if nothing is active
+    if (!currentId && addresses.length > 0) {
+        currentId = addresses[0]._id;
+    }
 
-  // Handler for temporary location set (from 'check' mode)
+    setSelectedId(currentId);
+    // Reset mode to select when modal opens
+    if (isOpen) setMode("select");
+
+  }, [addresses, isOpen]);
+
+  // Handler for temporary location set (from 'check' mode - UNCHANGED)
   const handleApplyCheckedAddress = (locationData) => {
-    // 1. Format and save to local storage
+    // ... [existing logic to save location data to local storage and reload]
     const locDataForStorage = {
       lat: locationData.lat, 
       lng: locationData.lng, 
       city: locationData.city, 
       pincode: locationData.pincode,
-      addressLine1: locationData.address // Store the selected address line 
+      addressLine1: locationData.address 
     };
     localStorage.setItem("livemart_active_location", JSON.stringify(locDataForStorage));
-
-    // 2. Dispatch event to notify all listening components (like LocalProducts)
+    localStorage.removeItem("livemart_active_address_full"); // Clear full address when using temporary location
+    
     if (typeof window !== "undefined") {
         window.dispatchEvent(new Event("livemart-location-update"));
-        
-        // --- FIX: Force a page reload to guarantee the UI is updated ---
         window.location.reload(); 
     }
-    
-    // 3. Close the modal
     onClose();
   };
 
@@ -70,12 +93,15 @@ export default function CustomerAddressModal({ isOpen, onClose, addresses, onSel
   const handleConfirmSelection = () => {
     if (selectedId) {
       const addr = addresses.find((a) => a._id === selectedId);
-      onSelect(addr); // This calls setActiveLocation in Navbar, which now reloads
+      onSelect(addr); // This calls setActiveLocation in parent/navbar, which reloads
     }
   };
+  
+  // Helper to find index of an address
+  const findAddressIndex = (id) => addresses.findIndex(a => a._id === id);
 
-  // Handle saving a new address
-  const handleSaveNewAddress = async (newAddress) => {
+  // Handle saving an edited address
+  const handleSaveAddress = async (updatedAddress, isNew) => {
     try {
       const token = localStorage.getItem("token");
       
@@ -83,38 +109,147 @@ export default function CustomerAddressModal({ isOpen, onClose, addresses, onSel
       const profileRes = await fetch("/api/user/profile", {
         headers: { Authorization: `Bearer ${token}` },
       });
-      const { user } = await profileRes.json();
+      const { user: currentProfile } = await profileRes.json();
 
-      // 2. Add new address
-      const updatedAddresses = [...(user.addresses || []), newAddress];
+      let newAddresses = [...(currentProfile.addresses || [])];
+      
+      if (isNew) {
+        // Add mode
+        newAddresses.push(updatedAddress);
+      } else {
+        // Edit mode: Find the index and replace the address
+        const index = findAddressIndex(updatedAddress._id);
+        if (index > -1) {
+            newAddresses[index] = updatedAddress;
+        } else {
+            throw new Error("Address to edit not found.");
+        }
+      }
 
-      // 3. Save back to server
+      // 2. Save back to server
       const res = await fetch("/api/user/profile", {
         method: "PUT",
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify({ addresses: updatedAddresses }),
+        body: JSON.stringify({ addresses: newAddresses }),
       });
 
       if (res.ok) {
         const { user: updatedUser } = await res.json();
-        // 4. Notify parent to refresh user data
         onAddressAdded(updatedUser);
-        // 5. Auto-select the new address (it will be the last one)
-        const newlyCreated = updatedUser.addresses[updatedUser.addresses.length - 1];
-        if (newlyCreated) {
-            onSelect(newlyCreated); // This calls setActiveLocation in Navbar, which now reloads
+        
+        // Auto-select the newly added/edited address
+        const addrToSelect = isNew ? updatedUser.addresses[updatedUser.addresses.length - 1] : updatedAddress;
+        if (addrToSelect) {
+            onSelect(addrToSelect); // This calls setActiveLocation in parent/navbar, which reloads
         }
-        // 6. Reset mode
         setMode("select");
+      } else {
+        const errorData = await res.json();
+        throw new Error(errorData.error || "Failed to save address.");
       }
     } catch (err) {
       console.error("Failed to save address", err);
-      alert("Failed to save address. Please try again.");
+      alert("Failed to save address: " + err.message);
     }
   };
+  
+  // Handler for clicking the Edit button
+  const handleEditClick = (address) => {
+      setEditingAddress(address);
+      setMode("edit");
+  };
+  
+  // Handler for adding new address
+  const handleAddClick = () => {
+      // Clear editing address and set mode to add
+      setEditingAddress(null);
+      setMode("add");
+  }
+
+
+  const renderAddressList = () => (
+    <div className="grid gap-3 py-2 max-h-[250px] overflow-y-auto">
+      {addresses.length === 0 && (
+        <div className="text-center text-muted-foreground py-4">
+          No addresses found. Please add one.
+        </div>
+      )}
+      {addresses.map((addr) => (
+        <Card
+          key={addr._id}
+          className={`p-4 cursor-pointer border-2 transition-all flex items-center justify-between gap-3 ${
+            selectedId === addr._id
+              ? "border-black bg-gray-50"
+              : "border-transparent bg-gray-50 hover:bg-gray-100"
+          }`}
+        >
+          {/* Left Side: Info & Selector */}
+          <div 
+            className="flex items-start gap-3 flex-1"
+            onClick={() => setSelectedId(addr._id)}
+          >
+            <MapPin
+              className={`mt-1 h-5 w-5 shrink-0 ${
+                selectedId === addr._id ? "text-black" : "text-gray-400"
+              }`}
+            />
+            <div className="flex-1 min-w-0">
+              <div className="font-bold text-sm flex items-center">
+                {addr.label || "Address"}
+                {selectedId === addr._id && <Check className="h-4 w-4 text-black ml-2" />}
+              </div>
+              <p className="text-xs text-gray-500 mt-1 line-clamp-2">
+                {addr.addressLine1}, {addr.city} - {addr.pincode}
+              </p>
+            </div>
+          </div>
+          
+          {/* Right Side: Actions */}
+          <div className="flex items-center space-x-2 shrink-0">
+            <Button
+                variant="outline"
+                size="icon-sm"
+                onClick={() => handleEditClick(addr)}
+                className="text-gray-700 hover:text-blue-600"
+            >
+                <Edit className="h-4 w-4" />
+            </Button>
+          </div>
+        </Card>
+      ))}
+    </div>
+  );
+  
+  const renderAddressControls = () => (
+    <div className="flex flex-col gap-3 mt-2">
+      <Button
+        variant="outline"
+        onClick={handleAddClick}
+        className="w-full py-6 border-dashed border-2"
+      >
+        <Plus className="mr-2 h-4 w-4" /> Add New Address
+      </Button>
+      
+      <Button
+        variant="secondary"
+        onClick={() => setMode("check")}
+        className="w-full py-6 border-2 border-dashed text-black hover:bg-gray-200"
+      >
+        <Search className="mr-2 h-4 w-4" /> Check Another Location
+      </Button>
+
+      <Button
+        onClick={handleConfirmSelection}
+        disabled={!selectedId}
+        className="w-full rounded-full py-6 text-lg bg-black text-white hover:bg-black/80"
+      >
+        Confirm Delivery Address
+      </Button>
+    </div>
+  );
 
   return (
     <Dialog open={isOpen} onOpenChange={(open) => { if (!open) onClose(); }}>
@@ -123,92 +258,35 @@ export default function CustomerAddressModal({ isOpen, onClose, addresses, onSel
           <DialogTitle className="text-2xl font-bold text-center">
             {mode === "select" ? "Select Your Location" : 
              mode === "add" ? "Add New Address" :
-             "Check Another Location" // <--- NEW TITLE
+             mode === "edit" ? "Edit Address" : "Check Another Location"
             }
           </DialogTitle>
           <DialogDescription className="text-center">
             {mode === "select" 
-              ? "Choose a delivery location to see products available in your area." 
-              : mode === "add" ? "Enter your address details below." :
-              "Search or pin a temporary location." // <--- NEW DESCRIPTION
+              ? "Choose or edit an address to set your delivery location." 
+              : mode === "add" || mode === "edit" ? "Provide complete address details." :
+              "Search or pin a temporary location."
             }
           </DialogDescription>
         </DialogHeader>
 
-        {mode === "select" ? (
+        {mode === "select" && (
+          <>
+            {renderAddressList()}
+            {renderAddressControls()}
+          </>
+        )}
+        
+        {/* ADD/EDIT MODE */}
+        {(mode === "add" || mode === "edit") && (
           <div className="space-y-4">
-            {/* LIST VIEW */}
-            <div className="grid gap-3 py-2 max-h-[250px] overflow-y-auto">
-              {addresses.length === 0 && (
-                <div className="text-center text-muted-foreground py-4">
-                  No addresses found. Please add one.
-                </div>
-              )}
-              {addresses.map((addr) => (
-                <Card
-                  key={addr._id}
-                  className={`p-4 cursor-pointer border-2 transition-all flex items-start gap-3 ${
-                    selectedId === addr._id
-                      ? "border-black bg-gray-50"
-                      : "border-transparent bg-gray-50 hover:bg-gray-100"
-                  }`}
-                  onClick={() => setSelectedId(addr._id)}
-                >
-                  <MapPin
-                    className={`mt-1 h-5 w-5 ${
-                      selectedId === addr._id ? "text-black" : "text-gray-400"
-                    }`}
-                  />
-                  <div className="flex-1">
-                    <div className="font-bold text-sm">
-                      {addr.label || "Address"}
-                    </div>
-                    <p className="text-xs text-gray-500 mt-1 line-clamp-2">
-                      {addr.addressLine1}, {addr.city} - {addr.pincode}
-                    </p>
-                  </div>
-                  {selectedId === addr._id && (
-                    <Check className="h-5 w-5 text-black" />
-                  )}
-                </Card>
-              ))}
-            </div>
-
-            <div className="flex flex-col gap-3 mt-2">
-              <Button
-                variant="outline"
-                onClick={() => setMode("add")}
-                className="w-full py-6 border-dashed border-2"
-              >
-                <Plus className="mr-2 h-4 w-4" /> Add New Address
-              </Button>
-              
-              {/* --- NEW BUTTON: Switch to Check Mode --- */}
-              <Button
-                variant="secondary"
-                onClick={() => setMode("check")}
-                className="w-full py-6 border-2 border-dashed text-black hover:bg-gray-200"
-              >
-                <Search className="mr-2 h-4 w-4" /> Check Another Location
-              </Button>
-              {/* -------------------------------------- */}
-
-              <Button
-                onClick={handleConfirmSelection}
-                disabled={!selectedId}
-                className="w-full rounded-full py-6 text-lg bg-black text-white hover:bg-black/80"
-              >
-                Confirm Delivery Address
-              </Button>
-            </div>
-          </div>
-        ) : mode === "add" ? (
-          <div className="space-y-4">
-            {/* ADD ADDRESS FORM */}
+            {loadError && <div>Error loading maps.</div>}
             {isLoaded ? (
               <AddressForm 
-                onSave={handleSaveNewAddress} 
+                onSave={handleSaveAddress} 
                 onCancel={() => setMode("select")} 
+                isNew={mode === "add"}
+                initialAddress={editingAddress || {}}
               />
             ) : (
               <div className="py-10 flex justify-center">
@@ -216,9 +294,12 @@ export default function CustomerAddressModal({ isOpen, onClose, addresses, onSel
               </div>
             )}
           </div>
-        ) : ( // mode === "check"
+        )}
+
+        {/* CHECK MODE */}
+        {mode === "check" && (
           <div className="space-y-4">
-            {/* CHECK ADDRESS FORM */}
+            {loadError && <div>Error loading maps.</div>}
             {isLoaded ? (
               <CheckAddressForm 
                 onApply={handleApplyCheckedAddress} 
@@ -237,7 +318,11 @@ export default function CustomerAddressModal({ isOpen, onClose, addresses, onSel
   );
 }
 
-// --- SUB-COMPONENT: CheckAddressForm (Sets temporary location) ---
+// -----------------------------------------------------------
+// SUB-COMPONENT: CheckAddressForm (Sets temporary location) ---
+// (Remains unchanged from previous step's CheckoutAddressForm helper)
+// -----------------------------------------------------------
+
 function CheckAddressForm({ onApply, onCancel }) {
   const defaultCenter = useMemo(() => ({ lat: 20.5937, lng: 78.9629 }), []); 
 
@@ -249,7 +334,6 @@ function CheckAddressForm({ onApply, onCancel }) {
   const addressSearchSetValueRef = useRef(null);
 
   useEffect(() => {
-    // Try to load initial location from localStorage if available
     const savedLoc = localStorage.getItem("livemart_active_location");
     if (savedLoc) {
       try {
@@ -285,12 +369,10 @@ function CheckAddressForm({ onApply, onCancel }) {
       
       setAddressLabel(`${city} ${pincode}`);
       
-      // Update the search bar text
       if (addressSearchSetValueRef.current) {
         addressSearchSetValueRef.current(addressDescription, false);
       }
       
-      // Return data for the apply handler
       return { address: addressDescription, lat, lng, city, pincode };
       
     } catch (error) {
@@ -308,9 +390,8 @@ function CheckAddressForm({ onApply, onCancel }) {
     updateLocationAndAddress(e.latLng.lat(), e.latLng.lng());
   }, [updateLocationAndAddress]);
 
-  // --- FIX: Correctly call updateLocationAndAddress from AddressAutocomplete ---
   const handlePlaceSelect = useCallback(async (addressDescription, { lat, lng }) => {
-    // Call the core function to update marker position, map center, and reverse geocodes for the label
+    const latLng = { lat, lng };
     await updateLocationAndAddress(lat, lng); 
     if (mapRef.current) {
         mapRef.current.panTo({ lat, lng });
@@ -344,10 +425,7 @@ function CheckAddressForm({ onApply, onCancel }) {
       return;
     }
     
-    // Reverse geocode again to ensure the freshest location data is fetched
     const finalLocationData = await updateLocationAndAddress(markerPosition.lat, markerPosition.lng);
-
-    // Call the application handler (which saves to local storage and dispatches event)
     onApply(finalLocationData);
   };
 
@@ -417,10 +495,14 @@ function CheckAddressForm({ onApply, onCancel }) {
 }
 
 
-// --- SUB-COMPONENT: AddressForm (Logic from Profile Page - Remains the same) ---
-function AddressForm({ onSave, onCancel }) {
-  const defaultCenter = useMemo(() => ({ lat: 20.5937, lng: 78.9629 }), []); // India Center
-  
+// -----------------------------------------------------------
+// SUB-COMPONENT: AddressForm (Handles Add and Edit) ---
+// -----------------------------------------------------------
+function AddressForm({ onSave, onCancel, isNew, initialAddress }) {
+  const defaultCenter = useMemo(() => initialAddress.location?.coordinates?.[1] && initialAddress.location?.coordinates?.[0] ? 
+      ({ lat: initialAddress.location.coordinates[1], lng: initialAddress.location.coordinates[0] }) : 
+      ({ lat: 20.5937, lng: 78.9629 }), [initialAddress]); // Default to India Center
+
   const [address, setAddress] = useState({
     label: "Home",
     firstName: "",
@@ -433,17 +515,37 @@ function AddressForm({ onSave, onCancel }) {
     country: "India",
     countryCode: "+91",
     phone: "",
-    location: { type: 'Point', coordinates: [0, 0] }
+    location: { type: 'Point', coordinates: [0, 0] },
+    // Preserve ID if editing
+    ...(initialAddress._id ? { _id: initialAddress._id } : {}), 
+  });
+  
+  const { isLoaded, loadError } = useLoadScript({
+      googleMapsApiKey: process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY,
+      libraries: libraries,
   });
 
   const [mapCenter, setMapCenter] = useState(defaultCenter);
-  const [markerPosition, setMarkerPosition] = useState(null);
+  const [markerPosition, setMarkerPosition] = useState(defaultCenter);
   const [isLocating, setIsLocating] = useState(false);
-  const [showPermissionHelp, setShowPermissionHelp] = useState(false);
+  const [pinAddressText, setPinAddressText] = useState("");
   
   const mapRef = useRef(null);
   const addressSearchSetValueRef = useRef(null);
-  
+
+  useEffect(() => {
+    if (initialAddress._id) {
+        setAddress(initialAddress);
+        const [lng, lat] = initialAddress.location?.coordinates || [0, 0];
+        if (lng !== 0 || lat !== 0) {
+            setMarkerPosition({ lat, lng });
+            setMapCenter({ lat, lng });
+        }
+        setPinAddressText(initialAddress.addressLine1 || "");
+    }
+  }, [initialAddress]);
+
+
   const updateLocationAndAddress = useCallback(async (lat, lng, pan = true) => {
     const latLng = { lat, lng };
     setMarkerPosition(latLng);
@@ -452,14 +554,16 @@ function AddressForm({ onSave, onCancel }) {
     try {
       const results = await getGeocode({ location: latLng });
       const components = results[0]?.address_components || [];
-      const addressDescription = results[0]?.formatted_address || "";
+      const addressDescription = results[0]?.formatted_address || "Pinned Location";
+
+      setPinAddressText(`Current Pin: ${addressDescription}`);
 
       if (addressSearchSetValueRef.current) {
         addressSearchSetValueRef.current(addressDescription, false);
       }
 
       let newAddr = {
-        addressLine1: addressDescription.split(',')[0].trim(),
+        addressLine1: addressDescription,
         city: '',
         state: '',
         country: '',
@@ -477,8 +581,6 @@ function AddressForm({ onSave, onCancel }) {
         }
         if (component.types.includes('postal_code')) newAddr.pincode = component.long_name;
       }
-
-      if (!newAddr.addressLine1) newAddr.addressLine1 = addressDescription.split(',')[0].trim();
 
       const phoneCodeObj = countryCodeFound ? COUNTRY_DATA.find(c => c.iso2 === countryCodeFound) : null;
 
@@ -509,7 +611,6 @@ function AddressForm({ onSave, onCancel }) {
       (error) => {
         console.warn("Location access denied:", error);
         setIsLocating(false);
-        setShowPermissionHelp(true);
       }
     );
   }, [updateLocationAndAddress]);
@@ -523,7 +624,8 @@ function AddressForm({ onSave, onCancel }) {
     if (!markerPosition && !window.confirm("Location pin not set. Continue?")) {
       return;
     }
-    onSave(address);
+    // Pass object and whether it is new to parent handler
+    onSave(address, isNew);
   };
 
   const handleChange = (field, value) => {
@@ -543,148 +645,138 @@ function AddressForm({ onSave, onCancel }) {
   }, [updateLocationAndAddress]);
 
 
+  if (loadError) return <Alert variant="destructive"><AlertDescription>Error loading Google Maps. Please refresh.</AlertDescription></Alert>;
+
   return (
     <>
       <form onSubmit={handleSubmit} className="grid gap-4 py-2">
         <div className="flex justify-between items-center">
-          <Button type="button" variant="ghost" size="sm" onClick={onCancel} className="p-0 h-auto hover:bg-transparent">
-              <ArrowLeft className="h-4 w-4 mr-2"/> Back
+          <Button type="button" variant="ghost" size="sm" onClick={onCancel} className="p-0 h-auto hover:bg-transparent justify-start">
+              <ArrowLeft className="h-4 w-4 mr-2"/> Back to Selection
           </Button>
         </div>
-
+        
+        {/* Row 1: Label */}
         <div className="space-y-2">
           <Label>Address Label</Label>
-          <Input value={address.label} onChange={(e) => handleChange('label', e.target.value)} placeholder="e.g., Home, Work" />
+          <Input value={address.label} onChange={(e) => handleChange('label', e.target.value)} placeholder="e.g., Home, Work" className="h-11" />
         </div>
 
+        {/* Row 2: Names */}
         <div className="grid grid-cols-2 gap-4">
           <div className="space-y-2">
             <Label>First Name</Label>
-            <Input value={address.firstName} onChange={(e) => handleChange('firstName', e.target.value)} required />
+            <Input value={address.firstName} onChange={(e) => handleChange('firstName', e.target.value)} required className="h-11" />
           </div>
           <div className="space-y-2">
             <Label>Last Name</Label>
-            <Input value={address.lastName} onChange={(e) => handleChange('lastName', e.target.value)} />
+            <Input value={address.lastName} onChange={(e) => handleChange('lastName', e.target.value)} className="h-11" />
           </div>
         </div>
 
+        {/* Row 3: Address Search / Address Line 1 */}
         <div className="space-y-2">
-          <Label>Search Address</Label>
-          <AddressAutocomplete 
-            onSelect={handlePlaceSelect}
-            setExternalValueRef={addressSearchSetValueRef}
-          />
-          <Button type="button" variant="outline" size="sm" onClick={locateUser} disabled={isLocating} className="w-full mt-1">
-            {isLocating ? <Loader2 className="animate-spin h-4 w-4 mr-2" /> : <LocateFixed className="h-4 w-4 mr-2" />}
-            Use Current Location
-          </Button>
-          
-          <div className="h-[200px] w-full rounded-md overflow-hidden border mt-2">
-            <GoogleMap
-              zoom={markerPosition ? 15 : 5}
-              center={mapCenter}
-              mapContainerClassName="w-full h-full"
-              onClick={handleMapClick}
-              onLoad={(map) => (mapRef.current = map)}
-            >
-              {markerPosition && <Marker position={markerPosition} draggable onDragEnd={handleMarkerDragEnd} />}
-            </GoogleMap>
-          </div>
+            <Label>Address Line 1 (Search & Pin)</Label>
+            {isLoaded ? (
+                <AddressAutocomplete 
+                  onSelect={handlePlaceSelect}
+                  setExternalValueRef={addressSearchSetValueRef}
+                  initialAddressLine1={address.addressLine1}
+                />
+            ) : (
+                <div className="h-11 flex items-center text-sm text-gray-500"><Loader2 className="animate-spin h-4 w-4 mr-2"/> Loading Search...</div>
+            )}
+        </div>
+        
+        {/* Row 4: Map & Locate Button */}
+        <div className="space-y-2">
+            <Button type="button" variant="outline" size="sm" onClick={locateUser} disabled={isLocating || !isLoaded} className="w-full">
+              {isLocating ? <Loader2 className="animate-spin h-4 w-4 mr-2" /> : <LocateFixed className="h-4 w-4 mr-2" />}
+              Use Current Location
+            </Button>
+            
+            <div className="h-[200px] w-full rounded-md overflow-hidden border">
+                {isLoaded ? (
+                    <GoogleMap
+                      zoom={markerPosition ? 15 : 5}
+                      center={mapCenter}
+                      mapContainerClassName="w-full h-full"
+                      onClick={handleMapClick}
+                      onLoad={(map) => (mapRef.current = map)}
+                    >
+                      {markerPosition && <Marker position={markerPosition} draggable onDragEnd={handleMarkerDragEnd} />}
+                    </GoogleMap>
+                ) : (
+                    <div className="h-full grid place-items-center text-muted-foreground">Map Loading...</div>
+                )}
+            </div>
+            <p className="text-xs text-muted-foreground">{pinAddressText}</p>
         </div>
 
+
+        {/* Row 5: Address Line 2 */}
         <div className="space-y-2">
-          <Label>Address Line 1</Label>
-          <Input value={address.addressLine1} onChange={(e) => handleChange('addressLine1', e.target.value)} required />
+          <Label>Address Line 2 (Apt, Suite, Building)</Label>
+          <Input value={address.addressLine2} onChange={(e) => handleChange('addressLine2', e.target.value)} placeholder="Apartment, suite, unit, building (Optional)" className="h-11" />
         </div>
 
+        {/* Row 6: City/State/Pincode/CountryCode */}
         <div className="grid grid-cols-3 gap-4">
-          <div className="space-y-2">
-            <Label>City</Label>
-            <Input value={address.city} onChange={(e) => handleChange('city', e.target.value)} required />
-          </div>
-          <div className="space-y-2">
-            <Label>State</Label>
-            <Input value={address.state} onChange={(e) => handleChange('state', e.target.value)} />
-          </div>
-          <div className="space-y-2">
-            <Label>Pincode</Label>
-            <Input value={address.pincode} onChange={(e) => handleChange('pincode', e.target.value)} />
-          </div>
+            <div className="space-y-2">
+                <Label>City</Label>
+                <Input value={address.city} onChange={(e) => handleChange('city', e.target.value)} required className="h-11" />
+            </div>
+            <div className="space-y-2">
+                <Label>State</Label>
+                <Input value={address.state} onChange={(e) => handleChange('state', e.target.value)} className="h-11" />
+            </div>
+            <div className="space-y-2">
+                <Label>Pincode</Label>
+                <Input value={address.pincode} onChange={(e) => handleChange('pincode', e.target.value)} className="h-11" />
+            </div>
         </div>
 
+        {/* Row 7: Mobile Number */}
         <div className="space-y-2">
           <Label>Mobile Number</Label>
           <div className="flex gap-2">
             <select 
-              className="border rounded-md px-2 text-sm bg-background"
+              className="border rounded-xl px-2 text-sm bg-background h-11"
               value={address.countryCode}
               onChange={(e) => handleChange('countryCode', e.target.value)}
             >
               {COUNTRY_DATA.map(c => <option key={c.code} value={c.code}>{c.flag} {c.code}</option>)}
             </select>
-            <Input value={address.phone} onChange={(e) => handleChange('phone', e.target.value)} required type="tel" />
+            <Input value={address.phone} onChange={(e) => handleChange('phone', e.target.value)} required type="tel" className="h-11" />
           </div>
         </div>
 
-        <Button type="submit" className="w-full mt-2">
-          <Save className="mr-2 h-4 w-4" /> Save Address
-        </Button>
-      </form>
-
-      {/* --- PERMISSION HELP DIALOG --- */}
-      <Dialog open={showPermissionHelp} onOpenChange={setShowPermissionHelp}>
-        <DialogContent className="sm:max-w-[450px] z-[60]">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <Info className="h-5 w-5 text-blue-600" />
-              Enable Location Access
-            </DialogTitle>
-            <DialogDescription>
-              Your browser is blocking location access. Here is how to fix it:
-            </DialogDescription>
-          </DialogHeader>
-          
-          <div className="space-y-4 py-2 text-sm text-gray-600">
-            <div className="flex gap-3 items-start">
-              <div className="bg-gray-100 px-2 py-1 rounded font-mono text-xs font-bold text-black">1</div>
-              <p>Click the <strong>Lock icon</strong> or <strong>Settings icon</strong> on the left side of your address bar (URL bar).</p>
-            </div>
-            <div className="flex gap-3 items-start">
-              <div className="bg-gray-100 px-2 py-1 rounded font-mono text-xs font-bold text-black">2</div>
-              <p>Look for <strong>Location</strong> permissions and switch it to <strong>Allow</strong> or toggle it On.</p>
-            </div>
-            <div className="flex gap-3 items-start">
-              <div className="bg-gray-100 px-2 py-1 rounded font-mono text-xs font-bold text-black">3</div>
-              <p>Close this popup and click the button below to refresh.</p>
-            </div>
-          </div>
-
-          <DialogFooter>
-            <Button 
-              onClick={() => {
-                setShowPermissionHelp(false);
-                window.location.reload(); 
-              }} 
-              className="w-full"
-            >
-              <RefreshCw className="mr-2 h-4 w-4" /> I've Enabled It, Refresh Page
+        <DialogFooter className="mt-6">
+            <Button type="button" variant="outline" onClick={onCancel}>Cancel</Button>
+            <Button type="submit">
+                <Save className="mr-2 h-4 w-4" /> {isNew ? "Save Address" : "Save Changes"}
             </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+        </DialogFooter>
+      </form>
     </>
   );
 }
 
+
 // --- Helper: Address Autocomplete ---
-function AddressAutocomplete({ onSelect, setExternalValueRef }) {
+function AddressAutocomplete({ onSelect, setExternalValueRef, initialAddressLine1 }) {
   const {
     ready,
     value,
     setValue,
     suggestions: { status, data },
     clearSuggestions,
-  } = usePlacesAutocomplete({ debounce: 300 });
+  } = usePlacesAutocomplete({
+    requestOptions: {
+      componentRestrictions: { country: ["in", "pk", "bd", "np", "bt", "lk", "mv", "af"] },
+    },
+    debounce: 300,
+  });
 
   useEffect(() => {
     if (setExternalValueRef) {
@@ -693,12 +785,20 @@ function AddressAutocomplete({ onSelect, setExternalValueRef }) {
     }
   }, [setValue, setExternalValueRef]);
 
+  useEffect(() => {
+      // Set initial value when prop changes
+      if (initialAddressLine1 && initialAddressLine1 !== value) {
+          setValue(initialAddressLine1, false); 
+      }
+  }, [initialAddressLine1, setValue]);
+
+
   const handleSelect = async (addressDescription) => {
     setValue(addressDescription, false);
     clearSuggestions();
     try {
-      const results = await getGeocode({ address: addressDescription });
-      const { lat, lng } = await getLatLng(results[0]);
+      const geocodeResults = await getGeocode({ address: addressDescription });
+      const { lat, lng } = await getLatLng(geocodeResults[0]);
       onSelect(addressDescription, { lat, lng });
     } catch (error) {
       console.error("Error: ", error);
@@ -711,7 +811,8 @@ function AddressAutocomplete({ onSelect, setExternalValueRef }) {
         value={value}
         onChange={(e) => setValue(e.target.value)}
         disabled={!ready}
-        placeholder="Type to search..."
+        placeholder="Type to search for your address..."
+        className="h-11 pl-4 pr-4"
       />
       {status === "OK" && (
         <Card className="absolute top-full mt-1 w-full z-50 max-h-40 overflow-y-auto">

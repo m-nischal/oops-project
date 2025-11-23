@@ -34,6 +34,7 @@ export default async function handler(req, res) {
 
   return res.status(200).json({
     ok: true,
+    token, // <--- ADDED THIS: Send token to client so it can be saved
     user: { id: user._id, role: user.role, email: user.email },
   });
 }
