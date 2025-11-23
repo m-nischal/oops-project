@@ -169,7 +169,6 @@ export default function ProfilePage() {
   };
 
   const handleAddAddress = () => {
-    // FIX: Use current state 'name' and 'phone' variables for auto-fill
     const defaultNameParts = name ? name.split(" ") : [];
     setEditingAddress({
       label: "Home",
@@ -181,7 +180,7 @@ export default function ProfilePage() {
       state: "",
       pincode: "",
       country: COUNTRY_DATA[0].country,
-      phone: phone || "", // Use the currently entered phone number
+      phone: phone || "", 
       countryCode: COUNTRY_DATA[0].code,
       location: { type: "Point", coordinates: [0, 0] },
     });
@@ -201,14 +200,14 @@ export default function ProfilePage() {
     }
   };
 
-  // FIX: Handler now saves first, then redirects
   const handleFinishSetup = async () => {
     setIsSaving(true);
     try {
-      await performSave(); // Save current state (phone/name/addresses) before leaving
+      await performSave(); 
 
       if (user.role === "RETAILER") router.push("/retailer/dashboard");
       else if (user.role === "WHOLESALER") router.push("/wholesaler/dashboard");
+      else if (user.role === "DELIVERY") router.push("/delivery/assigned"); // Added Delivery Redirect
       else router.push("/");
     } catch (err) {
       setError("Failed to save details: " + err.message);
@@ -430,7 +429,7 @@ export default function ProfilePage() {
   );
 }
 
-// --- Address Modal (Unchanged) ---
+// --- SHARED UTILITY COMPONENTS FROM PROFILE PAGE ---
 function AddressModal({ isOpen, onClose, onSave, initialAddress, isNew }) {
   const { isLoaded, loadError } = useLoadScript({
     googleMapsApiKey: process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY,

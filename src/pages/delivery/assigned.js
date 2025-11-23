@@ -1,6 +1,27 @@
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/router";
-import { Clock, Package, RefreshCw, Search, CheckCircle, LogOut } from "lucide-react";
+import Link from "next/link"; // Added Link
+import { 
+  Clock, 
+  Package, 
+  RefreshCw, 
+  Search, 
+  CheckCircle, 
+  LogOut,
+  User, // Added Icons
+  Settings,
+  UserCircle
+} from "lucide-react";
+
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"; // Added Dropdown components
+import { Button } from "@/components/ui/button"; // Added Button
 
 import DeliveryLogin from "../../components/DeliveryLogin";
 import OrderRequests from "../../components/OrderRequests"; 
@@ -13,7 +34,7 @@ export default function AssignedPage() {
   // UI State
   const [activeTab, setActiveTab] = useState("requests");
   const [searchQuery, setSearchQuery] = useState("");
-  const [showSuccessModal, setShowSuccessModal] = useState(false); // <--- NEW STATE
+  const [showSuccessModal, setShowSuccessModal] = useState(false);
 
   // Data State
   const [deliveries, setDeliveries] = useState([]);
@@ -21,6 +42,9 @@ export default function AssignedPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [authChecked, setAuthChecked] = useState(false);
+  
+  // User State for Profile Dropdown
+  const [user, setUser] = useState(null);
 
   // -------------------------------
   // AUTH CHECK
@@ -36,6 +60,7 @@ export default function AssignedPage() {
         if ((meData.user.role || "").toUpperCase() !== "DELIVERY")
           return router.replace("/");
 
+        setUser(meData.user); // Store user data
         setAuthChecked(true);
         await fetchDeliveries();
       } catch (err) {
@@ -202,6 +227,17 @@ export default function AssignedPage() {
     )
   );
 
+  const handleLogout = async () => {
+    try {
+      await fetch("/api/auth/logout", { method: "POST" });
+      localStorage.removeItem("token"); // Clear client token
+      router.replace("/delivery/login"); // Redirect to login
+    } catch (err) {
+      console.error("Logout failed", err);
+      router.replace("/delivery/login");
+    }
+  };
+
   // -------------------------------
   // RENDER: AUTH & LOADING
   // -------------------------------
@@ -225,16 +261,12 @@ export default function AssignedPage() {
               id: selected.id,
               restaurantName: selected.pickup?.name,
               restaurantAddress: selected.pickup?.address,
-              // --- ADD THESE LINES ---
               restaurantLat: selected.pickup?.lat, 
               restaurantLng: selected.pickup?.lng, 
-              // -----------------------
               customerName: selected.dropoff?.name,
               customerAddress: selected.dropoff?.address,
-              // --- ADD THESE LINES ---
               customerLat: selected.dropoff?.lat,
               customerLng: selected.dropoff?.lng,
-              // -----------------------
               customerPhone: selected.dropoff?.phone,
               items: selected.items ?? [],
               total: selected.total ?? 0,
@@ -257,17 +289,6 @@ export default function AssignedPage() {
       </div>
     );
   }
-
-  const handleLogout = async () => {
-    try {
-      await fetch("/api/auth/logout", { method: "POST" });
-      localStorage.removeItem("token"); // Clear client token
-      router.replace("/delivery/login"); // Redirect to login
-    } catch (err) {
-      console.error("Logout failed", err);
-      router.replace("/delivery/login");
-    }
-  };
 
   // -------------------------------
   // RENDER: MAIN DASHBOARD
@@ -298,16 +319,49 @@ export default function AssignedPage() {
             {loading ? "Refreshing" : "Refresh"}
           </button>
 
-          {/* --- NEW LOGOUT BUTTON --- */}
-          <button
-            onClick={handleLogout}
-            className="px-4 py-2 bg-red-50 text-red-600 border border-red-200 rounded-lg text-sm font-medium flex items-center gap-2 hover:bg-red-100 transition-colors"
-            title="Log Out"
-          >
-            <LogOut className="size-4" />
-            <span className="hidden sm:inline">Logout</span>
-          </button>
+          {/* --- PROFILE DROPDOWN --- */}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="ghost" size="icon" className="rounded-full w-10 h-10 hover:bg-gray-200 bg-white border border-gray-200">
+                {user ? (
+                    <div className="bg-blue-600 text-white rounded-full w-8 h-8 flex items-center justify-center font-bold text-sm">
+                      {user.name ? user.name[0].toUpperCase() : <User className="h-4 w-4" />}
+                    </div>
+                ) : <UserCircle className="h-6 w-6 text-gray-600" />}
+              </Button>
+            </DropdownMenuTrigger>
+            
+            <DropdownMenuContent align="end" className="w-64 p-2 rounded-xl shadow-xl mt-2">
+              {user && (
+                <>
+                  <DropdownMenuLabel className="px-4 py-2 text-sm font-semibold">
+                    <div className="flex flex-col">
+                      <span>Hello, {user.name}</span>
+                      <span className="text-xs text-gray-400 font-normal truncate">{user.email}</span>
+                      <span className="text-[10px] font-bold text-blue-600 uppercase mt-0.5">Delivery Partner</span>
+                    </div>
+                  </DropdownMenuLabel>
+                  <DropdownMenuSeparator className="bg-gray-100" />
+                  <DropdownMenuItem asChild className="rounded-lg focus:bg-gray-50 cursor-pointer">
+                      <Link href="/profile" className="flex items-center py-2.5 px-4">
+                        <User className="mr-3 h-4 w-4 text-gray-500" /> Profile
+                      </Link>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem asChild className="rounded-lg focus:bg-gray-50 cursor-pointer">
+                       <Link href="/settings" className="flex items-center py-2.5 px-4">
+                         <Settings className="mr-3 h-4 w-4 text-gray-500" /> Settings
+                       </Link>
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator className="bg-gray-100" />
+                  <DropdownMenuItem onClick={handleLogout} className="text-red-600 focus:text-red-600 cursor-pointer rounded-lg py-2.5 px-4 flex items-center">
+                    <LogOut className="mr-3 h-4 w-4" /> Logout
+                  </DropdownMenuItem>
+                </>
+              )}
+            </DropdownMenuContent>
+          </DropdownMenu>
           {/* ------------------------- */}
+
         </div>
       </div>
 
