@@ -47,7 +47,7 @@ import { Button } from '@/components/ui/button';
 const formatPrice = (p) => `₹${Number(p || 0).toLocaleString('en-IN')}`;
 
 const settableStatuses = [
-  "processing", "shipped", "out_for_delivery", "delivered", "cancelled"
+  "processing", "shipped",  "cancelled"
 ];
 const finalStatuses = ["delivered", "cancelled", "refunded"];
 const ORDERS_PER_PAGE = 10;
