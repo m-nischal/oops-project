@@ -54,10 +54,13 @@ export default function CustomerNavbar() {
   // --- SEARCH STATE ---
   const [searchQuery, setSearchQuery] = useState("");
   const [suggestions, setSuggestions] = useState([]);
-  const [showSuggestions, setShowSuggestions] = useState(false);
   const searchRef = useRef(null);
+  const initialSyncRef = useRef(true);
+  
+  // --- NEW STATE: Track focus to control visibility ---
+  const [isSearchFocused, setIsSearchFocused] = useState(false); 
+  // ----------------------------------------------------
 
-  // --- MODAL STATES ---
   const [isAddressModalOpen, setIsAddressModalOpen] = useState(false);
   const [selectedAddress, setSelectedAddress] = useState(null);
   const [showManualModal, setShowManualModal] = useState(false);
@@ -72,39 +75,43 @@ export default function CustomerNavbar() {
     setCartItemCount(cart.length);
   };
 
-  // --- LIVE SEARCH HANDLER ---
+  // --- LIVE SEARCH HANDLER (MODIFIED to ONLY update suggestions) ---
   useEffect(() => {
+    // Prevent fetching if the query is too short OR if it's the very first sync
+    if (searchQuery.trim().length < 2) {
+      setSuggestions([]);
+      return;
+    }
+
     const delayDebounceFn = setTimeout(async () => {
-      if (searchQuery.trim().length > 1) {
-        try {
-          const params = new URLSearchParams();
-          params.set("q", searchQuery.trim());
-          params.set("limit", 5);
+      try {
+        const params = new URLSearchParams();
+        params.set("q", searchQuery.trim());
+        params.set("limit", 5);
 
-          if (router.query.lat) params.set("lat", router.query.lat);
-          if (router.query.lng) params.set("lng", router.query.lng);
-          if (router.query.radius) params.set("radius", router.query.radius);
+        if (router.query.lat) params.set("lat", router.query.lat);
+        if (router.query.lng) params.set("lng", router.query.lng);
+        if (router.query.radius) params.set("radius", router.query.radius);
 
-          const res = await fetch(`/api/products?${params.toString()}`);
-          const data = await res.json();
-          setSuggestions(data.items || []);
-          setShowSuggestions(true);
-        } catch (error) {
-          console.error("Autocomplete error", error);
-        }
-      } else {
-        setSuggestions([]);
-        setShowSuggestions(false);
+        const res = await fetch(`/api/products?${params.toString()}`);
+        const data = await res.json();
+        
+        // CRITICAL: Only update the array. Visibility is controlled by isSearchFocused.
+        setSuggestions(data.items || []); 
+      } catch (error) {
+        console.error("Autocomplete error", error);
       }
     }, 300);
 
     return () => clearTimeout(delayDebounceFn);
+    // Note: router.query remains a dependency to re-run suggestions when other filters change
   }, [searchQuery, router.query]);
 
   useEffect(() => {
     function handleClickOutside(event) {
       if (searchRef.current && !searchRef.current.contains(event.target)) {
-        setShowSuggestions(false);
+        // Only hide if we lost focus outside of the search bar
+        setIsSearchFocused(false);
       }
     }
     document.addEventListener("mousedown", handleClickOutside);
@@ -112,7 +119,7 @@ export default function CustomerNavbar() {
   }, []);
 
   const handleSearchSubmit = () => {
-    setShowSuggestions(false);
+    setIsSearchFocused(false);
     if (searchQuery.trim()) {
       const params = new URLSearchParams();
       params.set("q", searchQuery.trim());
@@ -209,9 +216,14 @@ export default function CustomerNavbar() {
     }
   };
 
+  // --- FIX: Logic to only set searchQuery once from URL on initial load ---
   useEffect(() => {
-    if (router.isReady && router.query.q) {
-      setSearchQuery(router.query.q);
+    if (router.isReady && initialSyncRef.current) {
+        if (router.query.q) {
+            setSearchQuery(router.query.q);
+        }
+        // IMPORTANT: Set ref to false so subsequent URL changes don't auto-set searchQuery
+        initialSyncRef.current = false; 
     }
   }, [router.isReady, router.query.q]);
 
@@ -438,11 +450,17 @@ export default function CustomerNavbar() {
               }
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              onFocus={() => searchQuery.length > 1 && setShowSuggestions(true)}
+              // --- MODIFIED FOCUS/BLUR HANDLERS ---
+              onFocus={() => setIsSearchFocused(true)}
+              onBlur={() => {
+                // Delay blur to allow time for suggestion click event to register
+                setTimeout(() => setIsSearchFocused(false), 150); 
+              }}
               onKeyDown={(e) => e.key === "Enter" && handleSearchSubmit()}
             />
 
-            {showSuggestions && suggestions.length > 0 && (
+            {/* Suggestions Pop-up logic: Requires focused AND results to be visible */}
+            {isSearchFocused && suggestions.length > 0 && (
               <div className="absolute top-full left-0 right-0 mt-2 bg-white rounded-2xl shadow-2xl border border-gray-100 z-50 overflow-hidden">
                 <div className="p-2 text-xs font-semibold text-gray-400 uppercase tracking-wider bg-gray-50">
                   Suggestions
@@ -452,7 +470,11 @@ export default function CustomerNavbar() {
                     <Link
                       key={product._id}
                       href={`/product/${product._id}`}
-                      onClick={() => setShowSuggestions(false)}
+                      // CRITICAL: Hide suggestions and clear focus immediately on click
+                      onClick={() => {
+                        setIsSearchFocused(false); // Hide the popup
+                        setSuggestions([]); // Clear suggestions to prevent accidental re-pop
+                      }}
                     >
                       <div className="flex items-center gap-3 p-3 hover:bg-gray-50 cursor-pointer transition-colors border-b border-gray-50 last:border-0">
                         <div className="h-12 w-12 bg-gray-100 rounded-lg flex-shrink-0 overflow-hidden">

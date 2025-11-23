@@ -17,7 +17,7 @@ export default async function handler(req, res) {
   }
 
   try {
-    // UPDATED: Select email and phone fields
+    // UPDATED: Select email, phone, and Feedback fields
     const user = await User.findById(id)
       .select("name role Feedback email phone")
       .lean();
@@ -37,13 +37,22 @@ export default async function handler(req, res) {
       averageRating = (totalSum / totalReviews).toFixed(1);
     }
 
+    // NEW: Sanitize Feedback to remove internal IDs
+    const sanitizedFeedback = (user.Feedback || []).map(f => {
+        // We keep author, rating, comment, createdAt
+        const { reviewerId, ...rest } = f;
+        return rest;
+    });
+
     return res.status(200).json({
       name: user.name,
       role: user.role,
       rating: parseFloat(averageRating),
       reviewCount: totalReviews,
-      email: user.email, // Return contact info
+      email: user.email,
       phone: user.phone,
+      // ADDED RAW FEEDBACK HERE
+      feedback: sanitizedFeedback,
     });
   } catch (err) {
     console.error("GET /api/public/user/[id] error:", err);

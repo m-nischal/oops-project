@@ -1,8 +1,9 @@
+// src/pages/order/[id].js
 import React, { useEffect, useState, useCallback } from "react";
 import { useRouter } from "next/router";
 import Link from "next/link";
 import CustomerNavbar from "@/components/CustomerNavbar";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
@@ -36,13 +37,13 @@ import {
   CheckCircle,
   Clock,
   XCircle,
-  ArrowLeft,
   AlertCircle,
   Store,
   Star,
   Phone,
   Mail,
   MessageSquare,
+  AlertTriangle,
 } from "lucide-react";
 
 // --- HELPERS ---
@@ -101,6 +102,23 @@ const getStatusBadge = (status) => {
   );
 };
 
+// NEW HELPER: Fetch review content (relying on updated API)
+const fetchReviewContent = async (type, targetId) => {
+  const token = localStorage.getItem("token");
+  const headers = token ? { Authorization: `Bearer ${token}` } : {};
+  try {
+    const res = await fetch(`/api/reviews/check?type=${type}&targetId=${targetId}`, { headers });
+    if (res.ok) {
+      const data = await res.json();
+      return data.review || null;
+    }
+  } catch (e) {
+    console.error(`Failed to fetch ${type} review content:`, e);
+  }
+  return null;
+};
+
+
 export default function OrderDetailsPage() {
   const router = useRouter();
   const { id } = router.query;
@@ -108,6 +126,18 @@ export default function OrderDetailsPage() {
   const [retailer, setRetailer] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+
+  // --- NEW STATE: Cancellation UI ---
+  const [isCancelling, setIsCancelling] = useState(false);
+  const [showCancelAlert, setShowCancelAlert] = useState(false);
+  // --- FIX 1: New state for success modal ---
+  const [showCancelSuccessModal, setShowCancelSuccessModal] = useState(false);
+  // ------------------------------------
+
+  // --- NEW STATE: Review Data Cache ---
+  const [productReviewData, setProductReviewData] = useState(null);
+  const [retailerReviewData, setRetailerReviewData] = useState(null);
+  // ------------------------------------
 
   // Review Modal State
   const [isReviewModalOpen, setIsReviewModalOpen] = useState(false);
@@ -122,14 +152,16 @@ export default function OrderDetailsPage() {
   const [hasExistingReview, setHasExistingReview] = useState(false);
   const [showOverwriteAlert, setShowOverwriteAlert] = useState(false);
 
+  // Augment fetchOrderData to get review status/content
   const fetchOrderData = useCallback(
     async (isSilent = false) => {
       if (!id) return;
       if (!isSilent) setLoading(true);
-      try {
-        const token = localStorage.getItem("token");
-        const headers = token ? { Authorization: `Bearer ${token}` } : {};
+      
+      const token = localStorage.getItem("token");
+      const headers = token ? { Authorization: `Bearer ${token}` } : {};
 
+      try {
         const res = await fetch(`/api/orders/${id}`, { headers });
         if (res.status === 401) {
           router.replace("/login");
@@ -143,9 +175,7 @@ export default function OrderDetailsPage() {
 
         if (orderData.sellerId) {
           try {
-            const userRes = await fetch(
-              `/api/public/user/${orderData.sellerId}`
-            );
+            const userRes = await fetch(`/api/public/user/${orderData.sellerId}`);
             if (userRes.ok) {
               const userData = await userRes.json();
               setRetailer(userData);
@@ -154,6 +184,25 @@ export default function OrderDetailsPage() {
             console.error("Retailer fetch failed", err);
           }
         }
+
+        // --- NEW: Fetch Review Content on Load if Delivered ---
+        const isDelivered = orderData.status === "delivered";
+        const firstItem = orderData.items?.[0];
+
+        if (isDelivered && firstItem) {
+            // Fetch both in parallel
+            const [productReview, retailerReview] = await Promise.all([
+                fetchReviewContent("product", firstItem.productId),
+                fetchReviewContent("retailer", orderData.sellerId),
+            ]);
+            setProductReviewData(productReview);
+            setRetailerReviewData(retailerReview);
+        } else {
+            setProductReviewData(null);
+            setRetailerReviewData(null);
+        }
+        // ----------------------------------------------------
+
       } catch (e) {
         setError(e.message);
       } finally {
@@ -166,23 +215,60 @@ export default function OrderDetailsPage() {
   useEffect(() => {
     fetchOrderData();
   }, [fetchOrderData]);
+  
+  // --- NEW: Handle Cancellation ---
+  const handleConfirmCancel = async () => {
+    if (!order) return;
+    setIsCancelling(true);
+    setShowCancelAlert(false);
+    
+    try {
+        const token = localStorage.getItem("token");
+        
+        // Use PATCH /api/orders/[id] to update status
+        const res = await fetch(`/api/orders/${order._id}`, {
+            method: 'PATCH',
+            headers: { 
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}` 
+            },
+            body: JSON.stringify({ status: 'cancelled' }) // API will infer restoreStock: true
+        });
 
+        if (!res.ok) {
+            const errData = await res.json();
+            throw new Error(errData.error || "Failed to cancel order.");
+        }
+        
+        // --- FIX 2: Show success modal instead of alert ---
+        setShowCancelSuccessModal(true);
+        // Re-fetch to update status and potentially clear review buttons
+        fetchOrderData(true); 
+
+    } catch (e) {
+        setError(e.message);
+    } finally {
+        setIsCancelling(false);
+    }
+  };
+
+
+  // Updated openReviewModal to use the fetched data for pre-population
   const openReviewModal = async (type, id, name) => {
     setReviewType(type);
     setReviewTargetId(id);
     setReviewTargetName(name);
     setReviewRating(5);
     setReviewComment("");
-
     setHasExistingReview(false);
-    try {
-      const res = await fetch(`/api/reviews/check?type=${type}&targetId=${id}`);
-      if (res.ok) {
-        const data = await res.json();
-        if (data.exists) setHasExistingReview(true);
-      }
-    } catch (e) {
-      console.error("Failed to check review status", e);
+    
+    let existingData = type === 'product' ? productReviewData : retailerReviewData;
+
+    // Use fetched data if available
+    if (existingData) {
+        setReviewRating(existingData.rating);
+        setReviewComment(existingData.comment);
+        setHasExistingReview(true); 
     }
 
     setIsReviewModalOpen(true);
@@ -220,7 +306,13 @@ export default function OrderDetailsPage() {
       );
       setIsReviewModalOpen(false);
       setShowOverwriteAlert(false);
-      await fetchOrderData(true);
+      
+      // --- CRITICAL: After successful submission, re-fetch and update cache ---
+      const freshReview = await fetchReviewContent(reviewType, reviewTargetId);
+      if (reviewType === 'product') setProductReviewData(freshReview);
+      if (reviewType === 'retailer') setRetailerReviewData(freshReview);
+      // -----------------------------------------------------------------
+
     } catch (e) {
       alert(e.message);
     } finally {
@@ -229,7 +321,9 @@ export default function OrderDetailsPage() {
   };
 
   const handleInitialSubmit = () => {
-    if (hasExistingReview) {
+    // Determine if review exists based on cached data
+    const existing = reviewType === 'product' ? productReviewData : retailerReviewData;
+    if (existing) {
       setShowOverwriteAlert(true);
     } else {
       performReviewSubmit();
@@ -262,9 +356,176 @@ export default function OrderDetailsPage() {
     );
 
   const currentStepIndex = getStatusIndex(order.status);
-  const isCancelled =
-    order.status === "cancelled" || order.status === "refunded";
+  // Determine final status types
+  const isCancelledOrRefunded = order.status === "cancelled" || order.status === "refunded";
+  const isCancelledOrFinal =
+    isCancelledOrRefunded || order.status === "delivered";
   const isDelivered = order.status === "delivered";
+  const isShipped = order.status === "shipped" || order.status === "out_for_delivery";
+  
+  // Determine if cancellation is allowed
+  // Allow cancellation if not in a final state and not shipped/out for delivery
+  const isCancellable = !isCancelledOrFinal && !isShipped; 
+  
+  const firstItem = order.items?.[0];
+
+  // --- MODIFIED: Product Review Action Card Component ---
+  const ProductReviewActionCard = ({ isDelivered, isCancelled }) => {
+    // Note: The review data access logic for `productReviewData` is outside this component and relies on global scope access.
+    const isProductReviewed = !!productReviewData; 
+    
+    if (!firstItem) return null;
+    
+    const itemTargetId = firstItem.productId;
+    const itemTargetName = firstItem.name;
+    const reviewText = isProductReviewed ? 'Edit Product Review' : 'Write Product Review';
+
+    return (
+      <Card className="border-gray-200 shadow-sm bg-white">
+        <CardHeader className="pb-4">
+          <CardTitle className="text-lg flex items-start gap-2">
+             <Star className="h-5 w-5 text-yellow-500 fill-yellow-400 shrink-0" />
+             <span className="leading-tight">{itemTargetName}</span>
+          </CardTitle>
+          <CardDescription>
+             Review your recently received product.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="pt-0">
+          {isCancelled ? ( 
+             <Button
+                variant="destructive"
+                size="sm"
+                className="h-9 text-sm w-full border-dashed text-red-500 cursor-not-allowed"
+                disabled
+             >
+                Order Cancelled
+             </Button>
+          ) : isDelivered ? (
+             <>
+                 <Button
+                    variant={isProductReviewed ? "default" : "outline"}
+                    size="sm"
+                    className="h-9 text-sm w-full"
+                    onClick={() => openReviewModal("product", itemTargetId, itemTargetName)}
+                 >
+                    {reviewText}
+                 </Button>
+             </>
+          ) : (
+            <Button
+                variant="outline"
+                size="sm"
+                className="h-9 text-sm w-full border-dashed text-gray-500 cursor-not-allowed"
+                disabled
+            >
+                Review available after delivery
+            </Button>
+          )}
+        </CardContent>
+      </Card>
+    );
+  };
+
+  // --- MODIFIED: Retailer Review Action Card Component ---
+  const RetailerReviewActionCard = ({ isDelivered, isCancelled }) => {
+    // Note: The review data access logic for `retailerReviewData` relies on global scope access.
+    const isRetailerReviewed = !!retailerReviewData;
+    
+    if (!retailer) return null;
+    
+    const retailerTargetId = order.sellerId;
+    const retailerTargetName = retailer.name;
+    const reviewText = isRetailerReviewed ? 'Edit Seller Review' : 'Rate Seller';
+    
+    const currentRating = retailer.rating || 0.0;
+    const currentReviewCount = retailer.reviewCount || 0;
+
+    return (
+        <Card className="border-gray-200 shadow-sm bg-white">
+          <CardHeader className="pb-4">
+              <CardTitle className="text-lg flex items-center gap-2">
+                <Store className="h-5 w-5 text-gray-700" />
+                {retailerTargetName}
+              </CardTitle>
+              <CardDescription>
+                  Sold by this retailer. Rate your experience below.
+              </CardDescription>
+          </CardHeader>
+          <CardContent className="pt-0 space-y-4">
+              
+              {/* RETAILER DETAILS */}
+              <div className="space-y-3">
+                  <div className="flex items-center gap-1">
+                      {[...Array(5)].map((_, i) => (
+                          <Star
+                              key={i}
+                              className={`h-4 w-4 ${
+                                i < Math.round(currentRating)
+                                  ? "text-yellow-400 fill-yellow-400"
+                                  : "text-gray-300"
+                            }`}
+                        />
+                    ))}
+                    <span className="text-xs text-gray-500 font-medium ml-1">
+                        {currentRating.toFixed(1)} ({currentReviewCount} reviews)
+                    </span>
+                </div>
+                
+                {(retailer.email || retailer.phone) && (
+                    <div className="space-y-1">
+                        {retailer.phone && (
+                            <div className="flex items-center gap-2 text-sm text-gray-600">
+                                <Phone className="h-4 w-4 text-gray-400" /> <span>{retailer.phone}</span>
+                            </div>
+                        )}
+                        {retailer.email && (
+                            <div className="flex items-center gap-2 text-sm text-gray-600">
+                                <Mail className="h-4 w-4 text-gray-400" /> <span>{retailer.email}</span>
+                            </div>
+                        )}
+                    </div>
+                )}
+            </div>
+
+            <Separator className="bg-gray-100"/>
+            
+            {/* REVIEW ACTION BUTTON */}
+            {isCancelled ? ( // Check if cancelled
+                 <Button
+                    variant="destructive"
+                    size="sm"
+                    className="h-9 text-sm w-full border-dashed text-red-500 cursor-not-allowed"
+                    disabled
+                 >
+                    Order Cancelled
+                 </Button>
+            ) : isDelivered ? (
+                <>
+                    <Button
+                        variant={isRetailerReviewed ? "default" : "outline"}
+                        size="sm"
+                        className="h-9 text-sm w-full"
+                        onClick={() => openReviewModal("retailer", retailerTargetId, retailerTargetName)}
+                    >
+                        {reviewText}
+                    </Button>
+                </>
+            ) : (
+                <Button 
+                    variant="outline"
+                    size="sm"
+                    className="h-9 text-sm w-full border-dashed text-gray-500 cursor-not-allowed"
+                    disabled
+                >
+                    Review available after delivery
+                </Button>
+            )}
+        </CardContent>
+      </Card>
+    );
+  };
+
 
   return (
     <div className="min-h-screen bg-gray-50 font-sans pb-20">
@@ -272,38 +533,42 @@ export default function OrderDetailsPage() {
 
       <main className="max-w-5xl mx-auto px-6 py-8">
         <nav className="flex items-center text-sm text-gray-500 mb-6">
-          <Link href="/" className="hover:text-black transition-colors">
-            Home
-          </Link>
+          <Link href="/" className="hover:text-black transition-colors">Home</Link>
           <ChevronRight className="h-4 w-4 mx-2" />
-          <Link href="/orders" className="hover:text-black transition-colors">
-            Orders
-          </Link>
+          <Link href="/orders" className="hover:text-black transition-colors">Orders</Link>
           <ChevronRight className="h-4 w-4 mx-2" />
-          <span className="font-semibold text-black">
-            #{order._id.slice(-6).toUpperCase()}
-          </span>
+          <span className="font-semibold text-black">#{order._id.slice(-6).toUpperCase()}</span>
         </nav>
 
         <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-8">
           <div>
             <h1 className="text-3xl font-black text-gray-900">Order Details</h1>
-            <p className="text-gray-500 text-sm mt-1">
-              Order ID:{" "}
-              <span className="font-mono text-black font-medium">
-                #{order._id}
-              </span>{" "}
-              • Placed on {formatDate(order.createdAt)}
-            </p>
+            <p className="text-gray-500 text-sm mt-1">Order ID: <span className="font-mono text-black font-medium">#{order._id}</span> • Placed on {formatDate(order.createdAt)}</p>
           </div>
-          {getStatusBadge(order.status)}
+          <div className="flex items-center gap-4">
+             {getStatusBadge(order.status)}
+             {/* --- NEW: CANCEL BUTTON --- */}
+             {isCancellable && (
+                 <Button
+                    variant="destructive"
+                    size="sm"
+                    onClick={() => setShowCancelAlert(true)}
+                    disabled={isCancelling}
+                    className="h-9 rounded-lg"
+                 >
+                    {isCancelling ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <XCircle className="h-4 w-4 mr-2" />}
+                    Cancel Order
+                 </Button>
+             )}
+             {/* --------------------------- */}
+          </div>
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
           {/* LEFT COLUMN: Timeline & Items & Shipping Details */}
           <div className="lg:col-span-2 space-y-6">
             {/* Timeline Card */}
-            {!isCancelled && (
+            {!isCancelledOrFinal && (
               <Card className="border-none shadow-sm">
                 <CardContent className="p-8">
                   <div className="relative flex justify-between items-center">
@@ -311,11 +576,7 @@ export default function OrderDetailsPage() {
                       <div
                         className="h-full bg-black transition-all duration-500"
                         style={{
-                          width: `${
-                            (Math.max(0, currentStepIndex) /
-                              (STATUS_STEPS.length - 1)) *
-                            100
-                          }%`,
+                          width: `${(Math.max(0, currentStepIndex) / (STATUS_STEPS.length - 1)) * 100}%`,
                         }}
                       />
                     </div>
@@ -357,64 +618,33 @@ export default function OrderDetailsPage() {
 
             {/* Items List */}
             <Card className="border-gray-200 shadow-sm overflow-hidden">
-              <CardHeader className="bg-gray-50/50 border-b border-gray-100">
-                <CardTitle className="text-lg">Items in this Order</CardTitle>
-              </CardHeader>
-              <CardContent className="p-0">
-                {order.items.map((item, idx) => (
-                  <div
-                    key={idx}
-                    className="flex gap-4 p-6 border-b border-gray-50 last:border-none hover:bg-gray-50/50 transition-colors items-center cursor-pointer group"
-                    onClick={() => router.push(`/product/${item.productId}`)}
-                  >
-                    <div className="h-24 w-24 bg-gray-100 rounded-xl flex items-center justify-center flex-shrink-0 overflow-hidden border border-gray-100">
-                      <Package className="h-8 w-8 text-gray-300" />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex justify-between items-start mb-1">
-                        <h3 className="font-bold text-base text-gray-900 line-clamp-2 group-hover:text-blue-600 transition-colors">
-                          {item.name}
-                        </h3>
-                        <p className="font-bold text-lg">
-                          {formatPrice(item.unitPrice)}
-                        </p>
-                      </div>
-                      <p className="text-sm text-gray-500">
-                        Size:{" "}
-                        <span className="font-medium text-black">
-                          {item.sizeLabel}
-                        </span>{" "}
-                        | Qty:{" "}
-                        <span className="font-medium text-black">
-                          {item.qty}
-                        </span>
-                      </p>
-
-                      {isDelivered && (
-                        <Button
-                          variant="link"
-                          className="p-0 h-auto text-blue-600 mt-2 text-sm font-semibold"
-                          onClick={(e) => {
-                            e.stopPropagation(); // Prevent navigation
-                            openReviewModal(
-                              "product",
-                              item.productId,
-                              item.name
-                            );
-                          }}
+                <CardHeader className="bg-gray-50/50 border-b border-gray-100">
+                    <CardTitle className="text-lg">Items in this Order</CardTitle>
+                </CardHeader>
+                <CardContent className="p-0">
+                    {order.items.map((item, idx) => (
+                        <div
+                            key={idx}
+                            className="flex gap-4 p-6 border-b border-gray-50 last:border-none hover:bg-gray-50/50 transition-colors items-center cursor-pointer group"
+                            onClick={() => router.push(`/product/${item.productId}`)}
                         >
-                          Write a Review
-                        </Button>
-                      )}
-                    </div>
-                    {/* Mobile Arrow Indicator */}
-                    <ChevronRight className="h-5 w-5 text-gray-300 group-hover:text-blue-500 transition-colors md:hidden" />
-                  </div>
-                ))}
-              </CardContent>
+                            <div className="h-24 w-24 bg-gray-100 rounded-xl flex items-center justify-center flex-shrink-0 overflow-hidden border border-gray-100">
+                                <Package className="h-8 w-8 text-gray-300" />
+                            </div>
+                            <div className="flex-1 min-w-0">
+                                <div className="flex justify-between items-start mb-1">
+                                    <h3 className="font-bold text-base text-gray-900 line-clamp-2 group-hover:text-blue-600 transition-colors">{item.name}</h3>
+                                    <p className="font-bold text-lg">{formatPrice(item.unitPrice)}</p>
+                                </div>
+                                <p className="text-sm text-gray-500">Size: <span className="font-medium text-black">{item.sizeLabel}</span> | Qty: <span className="font-medium text-black">{item.qty}</span></p>
+                            </div>
+                            <ChevronRight className="h-5 w-5 text-gray-300 group-hover:text-blue-500 transition-colors md:hidden" />
+                        </div>
+                    ))}
+                </CardContent>
             </Card>
 
-            {/* Shipping & Payment Details (Moved & Horizontal) */}
+            {/* Shipping & Payment Details */}
             <Card className="border-gray-200 shadow-sm">
               <CardHeader className="pb-4 border-b border-gray-100 bg-gray-50/30">
                 <CardTitle className="text-lg">Shipping & Payment</CardTitle>
@@ -476,9 +706,9 @@ export default function OrderDetailsPage() {
             </Card>
           </div>
 
-          {/* RIGHT COLUMN: Summary & Retailer Info */}
+          {/* RIGHT COLUMN: Summary & Review Cards */}
           <div className="space-y-6">
-            {/* Order Summary */}
+            {/* Order Summary Card */}
             <Card className="border-gray-200 shadow-sm">
               <CardHeader className="pb-4">
                 <CardTitle>Order Summary</CardTitle>
@@ -512,93 +742,75 @@ export default function OrderDetailsPage() {
               </CardContent>
             </Card>
 
-            {/* Retailer Info */}
-            <Card className="border-gray-200 shadow-sm bg-gray-50">
-              <CardContent className="p-5">
-                {retailer ? (
-                  <div className="space-y-4">
-                    <div className="flex items-start gap-4">
-                      <div className="h-12 w-12 bg-white rounded-full flex items-center justify-center shadow-sm border border-gray-100 flex-shrink-0">
-                        <Store className="h-6 w-6 text-gray-700" />
-                      </div>
-                      <div className="flex-1">
-                        <p className="text-xs font-bold text-gray-400 uppercase mb-1">
-                          Sold By
-                        </p>
-                        <div className="flex justify-between items-start">
-                          <p className="font-bold text-gray-900 text-base">
-                            {retailer.name}
-                          </p>
-                          {isDelivered && (
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              className="h-8 text-xs ml-2"
-                              onClick={() =>
-                                openReviewModal(
-                                  "retailer",
-                                  order.sellerId,
-                                  retailer.name
-                                )
-                              }
-                            >
-                              Rate Seller
-                            </Button>
-                          )}
-                        </div>
-                        <div className="flex items-center gap-1 mt-1">
-                          <div className="flex">
-                            {[...Array(5)].map((_, i) => (
-                              <Star
-                                key={i}
-                                className={`h-3 w-3 ${
-                                  i < Math.round(retailer.rating || 0)
-                                    ? "text-yellow-400 fill-yellow-400"
-                                    : "text-gray-300"
-                                }`}
-                              />
-                            ))}
-                          </div>
-                          <span className="text-xs text-gray-500 font-medium ml-1">
-                            ({retailer.reviewCount || 0} reviews)
-                          </span>
-                        </div>
-                      </div>
-                    </div>
-
-                    {(retailer.email || retailer.phone) && (
-                      <>
-                        <Separator className="bg-gray-200" />
-                        <div className="space-y-2 pt-1">
-                          {retailer.phone && (
-                            <div className="flex items-center gap-2 text-sm text-gray-600">
-                              <Phone className="h-4 w-4 text-gray-400" />{" "}
-                              <span>{retailer.phone}</span>
-                            </div>
-                          )}
-                          {retailer.email && (
-                            <div className="flex items-center gap-2 text-sm text-gray-600">
-                              <Mail className="h-4 w-4 text-gray-400" />{" "}
-                              <span>{retailer.email}</span>
-                            </div>
-                          )}
-                        </div>
-                      </>
-                    )}
-                  </div>
-                ) : (
-                  <div className="flex items-center gap-3 text-gray-500 text-sm">
-                    <Loader2 className="h-4 w-4 animate-spin" /> Loading seller
-                    info...
-                  </div>
-                )}
-              </CardContent>
-            </Card>
+            {/* --- REVIEW CARDS --- */}
+            <RetailerReviewActionCard isDelivered={isDelivered} isCancelled={isCancelledOrRefunded} />
+            <ProductReviewActionCard isDelivered={isDelivered} isCancelled={isCancelledOrRefunded} />
+            {/* -------------------- */}
           </div>
         </div>
       </main>
+      
+      {/* --- CANCEL ORDER CONFIRMATION ALERT --- */}
+      <AlertDialog
+        open={showCancelAlert}
+        onOpenChange={setShowCancelAlert}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="text-red-600 flex items-center">
+                <AlertTriangle className="h-5 w-5 mr-2" />
+                Confirm Cancellation
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to cancel this order? This action will restore 
+              the product stock and cannot be undone.
+              {isShipped && (
+                  <p className="mt-2 text-sm font-semibold text-red-700">
+                      Note: This order has already shipped. Cancellation may not be possible 
+                      and you may still be charged a cancellation fee by the seller.
+                  </p>
+              )}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => setShowCancelAlert(false)} disabled={isCancelling}>
+              Keep Order
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleConfirmCancel}
+              disabled={isCancelling}
+              className="bg-red-600 hover:bg-red-700"
+            >
+              {isCancelling ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <XCircle className="h-4 w-4 mr-2" />}
+              Yes, Cancel Order
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
-      {/* REVIEW MODAL */}
+      {/* --- FIX 3: NEW CANCELLATION SUCCESS DIALOG (POPUP) --- */}
+      <Dialog open={showCancelSuccessModal} onOpenChange={setShowCancelSuccessModal}>
+        <DialogContent className="sm:max-w-xs">
+          <DialogHeader className="text-center">
+            <div className="flex justify-center mb-2">
+                <CheckCircle className="h-12 w-12 text-green-500" />
+            </div>
+            <DialogTitle className="text-2xl">Order Cancelled!</DialogTitle>
+            <DialogDescription className="text-gray-600">
+              Your order has been successfully cancelled. Stock will be restored shortly.
+            </DialogDescription>
+          </DialogHeader>
+          
+          <DialogFooter>
+            <Button onClick={() => setShowCancelSuccessModal(false)} className="w-full bg-black hover:bg-gray-800">
+              OK
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+
+      {/* REVIEW MODAL (Uses reviewRating/reviewComment for pre-population) */}
       <Dialog open={isReviewModalOpen} onOpenChange={setIsReviewModalOpen}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
@@ -655,7 +867,7 @@ export default function OrderDetailsPage() {
               ) : (
                 <MessageSquare className="h-4 w-4 mr-2" />
               )}
-              Submit Review
+              {hasExistingReview ? "Update Review" : "Submit Review"}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -690,3 +902,162 @@ export default function OrderDetailsPage() {
     </div>
   );
 }
+
+// --- MODIFIED: Product Review Action Card Component ---
+const ProductReviewActionCard = ({ isDelivered, isCancelled }) => {
+  const router = useRouter();
+  // Rely on outer component's state to check product details
+  const order = router.query.order; // Mock order to access items/productReviewData
+  const firstItem = order?.items?.[0];
+
+  if (!firstItem) return null;
+  
+  // These variables are now assumed to be passed/available in the outer scope
+  const isProductReviewed = !!productReviewData;
+  const itemTargetId = firstItem.productId;
+  const itemTargetName = firstItem.name;
+  const reviewText = isProductReviewed ? 'Edit Product Review' : 'Write Product Review';
+
+  return (
+    <Card className="border-gray-200 shadow-sm bg-white">
+      <CardHeader className="pb-4">
+        <CardTitle className="text-lg flex items-start gap-2">
+             <Star className="h-5 w-5 text-yellow-500 fill-yellow-400 shrink-0" />
+             <span className="leading-tight">{itemTargetName}</span>
+        </CardTitle>
+        <CardDescription>
+             Review your recently received product.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="pt-0">
+          {isCancelled ? ( 
+             <Button
+                variant="destructive"
+                size="sm"
+                className="h-9 text-sm w-full border-dashed text-red-500 cursor-not-allowed"
+                disabled
+             >
+                Order Cancelled
+             </Button>
+          ) : isDelivered ? (
+             <>
+                 <Button
+                    variant={isProductReviewed ? "default" : "outline"}
+                    size="sm"
+                    className="h-9 text-sm w-full"
+                    onClick={() => openReviewModal("product", itemTargetId, itemTargetName)}
+                 >
+                    {reviewText}
+                 </Button>
+             </>
+          ) : (
+            <Button
+                variant="outline"
+                size="sm"
+                className="h-9 text-sm w-full border-dashed text-gray-500 cursor-not-allowed"
+                disabled
+            >
+                Review available after delivery
+            </Button>
+          )}
+      </CardContent>
+    </Card>
+  );
+};
+
+// --- MODIFIED: Retailer Review Action Card Component ---
+const RetailerReviewActionCard = ({ isDelivered, isCancelled }) => {
+  const router = useRouter();
+  const isRetailerReviewed = !!retailerReviewData;
+  // Assume retailer and order/sellerId are available in outer scope via closures
+  const retailerTargetId = order?.sellerId;
+  const retailerTargetName = retailer?.name;
+  const reviewText = isRetailerReviewed ? 'Edit Seller Review' : 'Rate Seller';
+  
+  const currentRating = retailer?.rating || 0.0;
+  const currentReviewCount = retailer?.reviewCount || 0;
+
+  return (
+      <Card className="border-gray-200 shadow-sm bg-white">
+        <CardHeader className="pb-4">
+            <CardTitle className="text-lg flex items-center gap-2">
+              <Store className="h-5 w-5 text-gray-700" />
+              {retailerTargetName}
+            </CardTitle>
+            <CardDescription>
+                Sold by this retailer. Rate your experience below.
+            </CardDescription>
+        </CardHeader>
+        <CardContent className="pt-0 space-y-4">
+            
+            {/* RETAILER DETAILS */}
+            <div className="space-y-3">
+                <div className="flex items-center gap-1">
+                    {[...Array(5)].map((_, i) => (
+                        <Star
+                            key={i}
+                            className={`h-4 w-4 ${
+                              i < Math.round(currentRating)
+                                ? "text-yellow-400 fill-yellow-400"
+                                : "text-gray-300"
+                            }`}
+                        />
+                    ))}
+                    <span className="text-xs text-gray-500 font-medium ml-1">
+                        {currentRating.toFixed(1)} ({currentReviewCount} reviews)
+                    </span>
+                </div>
+                
+                {(retailer?.email || retailer?.phone) && (
+                    <div className="space-y-1">
+                        {retailer.phone && (
+                            <div className="flex items-center gap-2 text-sm text-gray-600">
+                                <Phone className="h-4 w-4 text-gray-400" /> <span>{retailer.phone}</span>
+                            </div>
+                        )}
+                        {retailer.email && (
+                            <div className="flex items-center gap-2 text-sm text-gray-600">
+                                <Mail className="h-4 w-4 text-gray-400" /> <span>{retailer.email}</span>
+                            </div>
+                        )}
+                    </div>
+                )}
+            </div>
+
+            <Separator className="bg-gray-100"/>
+            
+            {/* REVIEW ACTION BUTTON */}
+            {isCancelled ? ( // Check if cancelled
+                 <Button
+                    variant="destructive"
+                    size="sm"
+                    className="h-9 text-sm w-full border-dashed text-red-500 cursor-not-allowed"
+                    disabled
+                 >
+                    Order Cancelled
+                 </Button>
+            ) : isDelivered ? (
+                <>
+                    <Button
+                        variant={isRetailerReviewed ? "default" : "outline"}
+                        size="sm"
+                        className="h-9 text-sm w-full"
+                        onClick={() => openReviewModal("retailer", retailerTargetId, retailerTargetName)}
+                    >
+                        {reviewText}
+                    </Button>
+                </>
+            ) : (
+                <Button 
+                    variant="outline"
+                    size="sm"
+                    className="h-9 text-sm w-full border-dashed text-gray-500 cursor-not-allowed"
+                    disabled
+                >
+                    Review available after delivery
+                </Button>
+            )}
+        </CardContent>
+      </Card>
+  );
+};

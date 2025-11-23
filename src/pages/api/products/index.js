@@ -17,6 +17,11 @@ function calculateDistance(lat1, lon1, lat2, lon2) {
   return R * c;
 }
 
+// Helper: Safely escape regex special characters (Copied as necessary dependency)
+function escapeRegex(text) {
+  return text.replace(/[-[\]{}()*+?.,\\^$|#\s]/g, "\\$&");
+}
+
 export default async function handler(req, res) {
   await dbConnect();
 
@@ -63,56 +68,97 @@ export default async function handler(req, res) {
         if (maxPrice) filter.price.$lte = Number(maxPrice);
       }
       
-      // 6. ADVANCED Search Query (Smart AND Logic)
+      // 6. ADVANCED Search Query (Custom Gender/Unisex Logic)
       if (q) {
-        // Split query into individual terms
         const terms = q.trim().split(/\s+/).filter(t => t.length > 0);
-        
+        const qLower = q.trim().toLowerCase();
+
         if (terms.length > 0) {
-            // We need to find Retailers that match ANY of these terms
-            const anyTermRegex = new RegExp(terms.map(t => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join("|"), "i");
+            
+            let customFilter = null;
+            let isCustomGenderSearch = false;
+            
+            // Helper to build a regex OR condition for name/tags
+            const buildRegexOr = (patterns) => {
+                const regexes = patterns.map(p => new RegExp(`\\b${p}\\b`, 'i'));
+                return { $in: regexes };
+            };
+
+            // --- Apply Custom Gender/Unisex Rules (Rules 1-5) ---
+            
+            // Rule 5: Unisex Filter (must be explicitly searching for it)
+            if (qLower === 'unisex') {
+                isCustomGenderSearch = true;
+                customFilter = {
+                    $or: [
+                        { tags: { $all: [/boys/i, /girls/i] } },
+                        { tags: { $all: [/men/i, /women/i] } },
+                        { tags: { $in: [/unisex/i] } }
+                    ]
+                };
+            } 
+            // Rule 1: Men Filter (Men OR Unisex)
+            else if (terms.some(t => ['men', 'man', 'mens'].includes(t.toLowerCase()))) {
+                isCustomGenderSearch = true;
+                const patterns = ['man', 'men', 'mens', 'unisex'];
+                customFilter = { $or: [{ name: buildRegexOr(patterns) }, { tags: buildRegexOr(patterns) }] };
+            } 
+            // Rule 2: Women Filter (Women OR Unisex)
+            else if (terms.some(t => ['women', 'woman', 'womens'].includes(t.toLowerCase()))) {
+                isCustomGenderSearch = true;
+                const patterns = ['woman', 'women', 'womens', 'unisex'];
+                customFilter = { $or: [{ name: buildRegexOr(patterns) }, { tags: buildRegexOr(patterns) }] };
+            } 
+            // Rule 3: Boys Filter (Boys OR Unisex)
+            else if (terms.some(t => ['boy', 'boys'].includes(t.toLowerCase()))) {
+                isCustomGenderSearch = true;
+                const patterns = ['boy', 'boys', 'unisex'];
+                customFilter = { $or: [{ name: buildRegexOr(patterns) }, { tags: buildRegexOr(patterns) }] };
+            } 
+            // Rule 4: Girls Filter (Girls OR Unisex)
+            else if (terms.some(t => ['girl', 'girls'].includes(t.toLowerCase()))) {
+                isCustomGenderSearch = true;
+                const patterns = ['girl', 'girls', 'unisex'];
+                customFilter = { $or: [{ name: buildRegexOr(patterns) }, { tags: buildRegexOr(patterns) }] };
+            }
+            
+            const finalAndConditions = [];
+            
+            // 6a. If a custom filter was made, include it.
+            if (isCustomGenderSearch) {
+                finalAndConditions.push(customFilter);
+            }
+
+            // 6b. Fallback to original complex general search logic for all terms
+            // This handles non-gender terms (e.g., 'blue', 'shirt') AND integrates retailer search.
+            
+            const anyTermRegex = new RegExp(terms.map(t => escapeRegex(t)).join("|"), "i");
             const matchingRetailers = await User.find({ 
                 role: "RETAILER", 
                 name: { $regex: anyTermRegex } 
             }).select("_id name").lean();
 
-            // Smart Regex Builder
-            const andConditions = terms.map(term => {
+            const strictTerms = new Set([ "men", "mens", "women", "womens", "boy", "boys", "girl", "girls", "unisex" ]);
+            
+            const termConditions = terms.map(term => {
                 const lower = term.toLowerCase();
+                const safeTerm = escapeRegex(term);
                 let regexPattern;
 
-                // A. Handle Gender/Category Words (Strict but flexible for suffix)
-                // "men" -> matches "men", "mens", "men's" | BUT NOT "women"
-                if (["men", "mens", "man"].includes(lower)) {
-                    regexPattern = "\\bmen('?s?)?\\b";
-                } else if (["women", "womens", "woman"].includes(lower)) {
-                    regexPattern = "\\bwomen('?s?)?\\b";
-                } else if (["boy", "boys"].includes(lower)) {
-                    regexPattern = "\\bboy('?s?)?\\b";
-                } else if (["girl", "girls"].includes(lower)) {
-                    regexPattern = "\\bgirl('?s?)?\\b";
-                } else if (["kid", "kids"].includes(lower)) {
-                    regexPattern = "\\bkid('?s?)?\\b";
-                } 
-                // B. Handle Plurals/Singulars for normal words
-                // "shirts" -> matches "shirt", "shirts"
-                else if (lower.length > 3 && lower.endsWith('s')) {
-                    const root = term.slice(0, -1).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-                    regexPattern = `${root}(s?)`;
-                } 
-                // C. Default fuzzy match
-                else {
-                    regexPattern = term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                // This section implements the default logic for non-gender terms
+                if (strictTerms.has(lower)) {
+                    if (lower.startsWith("men")) regexPattern = "\\bmen('?s?)?\\b";
+                    else if (lower.startsWith("women")) regexPattern = "\\bwomen('?s?)?\\b";
+                    else regexPattern = `\\b${safeTerm}\\b`;
+                } else {
+                    // Use simple safe term for general search
+                    regexPattern = safeTerm;
                 }
 
                 const termRegex = new RegExp(regexPattern, "i");
+                
+                const retailerIds = matchingRetailers.filter(r => termRegex.test(r.name)).map(r => r._id);
 
-                // Find IDs of retailers that specifically match THIS term
-                const specificRetailerIds = matchingRetailers
-                    .filter(r => new RegExp(regexPattern, "i").test(r.name))
-                    .map(r => r._id);
-
-                // The term must match at least one of these fields
                 return {
                     $or: [
                         { name: { $regex: termRegex } },
@@ -120,16 +166,22 @@ export default async function handler(req, res) {
                         { tags: { $regex: termRegex } },
                         { category: { $regex: termRegex } },
                         { brand: { $regex: termRegex } },
-                        { retailer: { $regex: termRegex } },
-                        { ownerId: { $in: specificRetailerIds } }
-                    ]
+                        { ownerId: { $in: retailerIds } },
+                    ],
                 };
             });
-
-            if (filter.$and) {
-                filter.$and.push(...andConditions);
-            } else {
-                filter.$and = andConditions;
+            
+            // Combine both custom (if present) and general search results
+            if (!isCustomGenderSearch || terms.length > 1) {
+                finalAndConditions.push(...termConditions);
+            }
+            
+            if (finalAndConditions.length > 0) {
+                if (filter.$and) {
+                    filter.$and.push(...finalAndConditions);
+                } else {
+                    filter.$and = finalAndConditions;
+                }
             }
         }
       }

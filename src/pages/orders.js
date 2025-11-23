@@ -5,8 +5,17 @@ import CustomerNavbar from '@/components/CustomerNavbar';
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Loader2, Package, ChevronRight, AlertCircle, Clock, CheckCircle, XCircle, Truck } from 'lucide-react';
+import { 
+  Dialog, 
+  DialogContent, 
+  DialogHeader, 
+  DialogTitle, 
+  DialogDescription, 
+  DialogFooter 
+} from "@/components/ui/dialog";
+import { Loader2, Package, ChevronRight, AlertCircle, Clock, CheckCircle, XCircle, Truck, Split } from 'lucide-react';
 
+// --- HELPERS ---
 const formatPrice = (p) => `₹${Number(p || 0).toLocaleString('en-IN')}`;
 
 // Helper to get status color and icon
@@ -33,6 +42,11 @@ export default function OrderHistoryPage() {
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  
+  // --- NEW STATE: Split Order Modal ---
+  const [showSplitOrderModal, setShowSplitOrderModal] = useState(false);
+  const [splitOrderInfo, setSplitOrderInfo] = useState(null);
+  // ------------------------------------
 
   useEffect(() => {
     async function fetchOrders() {
@@ -66,8 +80,31 @@ export default function OrderHistoryPage() {
       }
     }
 
+    // --- NEW EFFECT: Check for split order info on load ---
+    function checkSplitOrder() {
+        const splitInfoJson = localStorage.getItem('order_split_info');
+        if (splitInfoJson) {
+            try {
+                const info = JSON.parse(splitInfoJson);
+                if (info.isSplit && info.count > 1) {
+                    setSplitOrderInfo(info);
+                    setShowSplitOrderModal(true);
+                }
+            } catch (e) {
+                console.error("Failed to parse split info", e);
+            } finally {
+                // IMPORTANT: Clear the flag immediately so it only shows once
+                localStorage.removeItem('order_split_info');
+            }
+        }
+    }
+    // --------------------------------------------------------
+
     fetchOrders();
-  }, [router]);
+    checkSplitOrder();
+    
+    // Note: Removed [router] from dep array to prevent unnecessary fetch after redirect
+  }, []);
 
   if (loading) {
     return (
@@ -195,6 +232,47 @@ export default function OrderHistoryPage() {
            </div>
         )}
       </main>
+      
+      {/* --- NEW SPLIT ORDER MODAL --- */}
+      {splitOrderInfo && (
+          <Dialog open={showSplitOrderModal} onOpenChange={setShowSplitOrderModal}>
+              <DialogContent className="sm:max-w-md">
+                  <DialogHeader className="text-center">
+                      <div className="flex justify-center mb-2">
+                          <Split className="h-12 w-12 text-blue-600" />
+                      </div>
+                      <DialogTitle className="text-2xl font-bold">Orders Split</DialogTitle>
+                      <DialogDescription className="text-gray-600">
+                          Your single checkout was split into <strong>{splitOrderInfo.count} separate orders</strong> because the items were sourced from different retailers.
+                          <p className="mt-2 text-sm">
+                             You can track each order individually in your order history.
+                          </p>
+                      </DialogDescription>
+                  </DialogHeader>
+                  
+                  <div className="py-2">
+                    <h4 className="text-md font-semibold mb-2">Orders Created:</h4>
+                    <ul className="space-y-1 text-sm text-gray-700">
+                      {splitOrderInfo.orderIds.map((id, index) => (
+                          <li key={id} className="font-mono bg-gray-50 p-2 rounded flex justify-between">
+                            Order {index + 1}: <span>#{id.slice(-6).toUpperCase()}</span>
+                          </li>
+                      ))}
+                    </ul>
+                  </div>
+
+                  <DialogFooter>
+                      <Button 
+                          onClick={() => setShowSplitOrderModal(false)} 
+                          className="w-full py-3 rounded-xl bg-black text-white font-bold text-lg hover:bg-gray-800"
+                      >
+                          Got It
+                      </Button>
+                  </DialogFooter>
+              </DialogContent>
+          </Dialog>
+      )}
+      {/* ----------------------------- */}
     </div>
   );
 }

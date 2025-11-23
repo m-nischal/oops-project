@@ -1,3 +1,4 @@
+// src/pages/index.js
 import React, { useEffect, useState } from 'react';
 import { useRouter } from 'next/router';
 import CustomerNavbar from '@/components/CustomerNavbar';
@@ -6,6 +7,7 @@ import BrandStrip from '@/components/home/BrandStrip';
 import NewArrivals from '@/components/home/NewArrivals';
 import LocalProducts from '@/components/home/LocalProducts';
 import BrowseByStyle from '@/components/home/BrowseByStyle'; // <--- Import Added
+import Recommendations from '@/components/home/Recommendations'; // <--- NEW IMPORT
 import { Loader2 } from 'lucide-react';
 
 export default function HomePage() {
@@ -72,18 +74,21 @@ export default function HomePage() {
 
       {/* CONTENT BELOW FOLD */}
       <main>
-        {/* 4. New Arrivals Section */}
-        <NewArrivals />
+        {/* 4. Local Products Section */}
+        <LocalProducts />
         
+        {/* 5. Recommendations Section (NEW POSITIONED HERE) */}
+        <Recommendations />
+        
+        {/* 6. New Arrivals Section (MOVED DOWN) */}
+        <NewArrivals />
+
         {/* Divider Line */}
         <div className="max-w-[1240px] mx-auto px-6">
             <hr className="border-gray-200" />
         </div>
 
-        {/* 5. Local Products Section */}
-        <LocalProducts />
-
-        {/* 6. Browse By Dress Style Section (New) */}
+        {/* 7. Browse By Dress Style Section */}
         <BrowseByStyle />
         
         {/* Footer Placeholder */}

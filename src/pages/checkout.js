@@ -1,4 +1,3 @@
-// src/pages/checkout.js
 import React, { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import { useRouter } from "next/router";
 import Link from "next/link";
@@ -156,7 +155,12 @@ export default function CheckoutPage() {
   const [mockOtp, setMockOtp] = useState('');
   const [otpInput, setOtpInput] = useState('');
   const [otpTimer, setOtpTimer] = useState(0);
-  const [isOrderComplete, setIsOrderComplete] = useState(false);
+  
+  // --- MODIFIED STATE FOR FINAL SUCCESS ---
+  const [showFinalSuccessModal, setShowFinalSuccessModal] = useState(false);
+  const [ordersPlaced, setOrdersPlaced] = useState([]);
+  // ----------------------------------------
+  
   const [paymentInitiating, setPaymentInitiating] = useState(false);
   const [finalPaymentMethod, setFinalPaymentMethod] = useState(null);
   const [finalPaymentId, setFinalPaymentId] = useState(null);
@@ -236,7 +240,7 @@ export default function CheckoutPage() {
     router.push(`/cart?paymentFailed=${encodeURIComponent(message || "Payment Failed")}`);
   }, [router]);
   
-  // --- FINAL ORDER CREATION ---
+  // --- FINAL ORDER CREATION (MODIFIED) ---
   const handleFinalizeOrder = useCallback(async (paymentId, paymentMethodNote) => {
     setLoading(true);
     setSubmissionError(null);
@@ -281,20 +285,25 @@ export default function CheckoutPage() {
       
       const data = await res.json(); 
 
+      // --- Cleanup and Redirect Logic ---
       localStorage.removeItem("lm_cart");
       localStorage.removeItem("livemart_cart");
       localStorage.removeItem("livemart_active_address_full"); 
       window.dispatchEvent(new Event("livemart-cart-update"));
       
-      const orderList = data.orders || [data];
-      const primaryOrderId = orderList[0]?._id;
-
-      if (paymentMethodNote === 'COD') {
-        setFinalPaymentId(primaryOrderId);
-        setIsOrderComplete(true);
-      } else {
-        router.replace(`/order/${primaryOrderId}`);
+      const orderList = data.orders || [data]; // Capture array of orders
+      
+      // 1. Set the split status flag in localStorage
+      if (orderList.length > 1) {
+          localStorage.setItem('order_split_info', JSON.stringify({
+              isSplit: true,
+              orderIds: orderList.map(o => o._id || o.id),
+              count: orderList.length,
+          }));
       }
+      
+      setOrdersPlaced(orderList); // Set the list to check for splits in the modal
+      setShowFinalSuccessModal(true); // Trigger the unified success modal
       
     }catch (e) {
       setSubmissionError("Order Failed: " + (e.message || e));
@@ -303,7 +312,7 @@ export default function CheckoutPage() {
     } finally { 
       setLoading(false); 
     }
-  }, [checkoutInfo, itemsWithDetails, router, handlePaymentFailure]);
+  }, [checkoutInfo, itemsWithDetails, handlePaymentFailure]);
 
 
   // --- OTP TIMER LOGIC ---
@@ -372,7 +381,7 @@ export default function CheckoutPage() {
     } else if (selectedPaymentMethod === 'COD') {
         const paymentId = `COD_${Date.now()}`;
         setFinalPaymentMethod('COD');
-        await handleFinalizeOrder(paymentId, 'COD');
+        await handleFinalizeOrder(paymentId, 'COD'); // Direct Finalize
     
     } else if (selectedPaymentMethod === 'UPI_QR') {
         setFinalPaymentMethod('UPI (QR Scan)');
@@ -774,6 +783,13 @@ export default function CheckoutPage() {
                                         <QrCode className="w-6 h-6 text-black"/>
                                     </div>
                                 )}
+                                
+                                {/* COD badge for clarity */}
+                                {isSelected && option.id === 'COD' && (
+                                    <span className="text-sm font-semibold text-gray-500">
+                                        Pay on Delivery
+                                    </span>
+                                )}
                             </label>
                             
                             {isSelected && option.id === 'COD' && (
@@ -913,41 +929,68 @@ export default function CheckoutPage() {
       <CardInputModal isOpen={showCardModal} onClose={() => setShowCardModal(false)} cardDetails={cardDetails} setCardDetails={setCardDetails} onConfirm={() => { setShowCardModal(false); const mock = generateMockOtp(); setMockOtp(mock); setOtpInput(''); setOtpTimer(30); setFinalPaymentMethod('Card'); setIsOtpModalOpen(true); }} onCancel={() => setShowCardModal(false)} />
 
       <UpiIdInputModal isOpen={showUpiIdModal} onClose={() => setShowUpiIdModal(false)} upiId={upiId} setUpiId={setUpiId} onConfirm={() => { setShowUpiIdModal(false); const mock = generateMockOtp(); setMockOtp(mock); setOtpInput(''); setOtpTimer(30); setFinalPaymentMethod(`UPI (ID: ${upiId})`); setIsOtpModalOpen(true); }} onCancel={() => setShowUpiIdModal(false)} />
+      
+      {/* --- FINAL SUCCESS MODAL --- */}
+      <OrderSuccessRedirectModal 
+          isOpen={showFinalSuccessModal}
+          ordersPlaced={ordersPlaced}
+          onClose={() => {
+            setShowFinalSuccessModal(false);
+            router.replace('/orders'); // Redirects to Order History
+          }}
+      />
     </div>
   );
 }
 
-// ... [FinalOrderSuccessScreen, MockOtpModal, UpiQrModal, CardInputModal, UpiIdInputModal components remain identical to previous step]
-const FinalOrderSuccessScreen = ({ orderId }) => {
-    const router = useRouter();
+// -----------------------------------------------------------
+// NEW COMPONENT: Unified Success Modal with Redirect to /orders
+// -----------------------------------------------------------
+const OrderSuccessRedirectModal = ({ isOpen, ordersPlaced, onClose }) => {
+    const isSplit = ordersPlaced.length > 1;
+    // Use the first order ID for display, fallback for missing ID
+    const primaryOrderId = ordersPlaced[0]?._id?.slice(-6).toUpperCase() || ordersPlaced[0]?.id?.slice(-6).toUpperCase() || 'MOCK';
+    
     return (
-        <div className="fixed inset-0 z-[100] bg-white flex items-center justify-center p-6 animate-in fade-in duration-500">
-            <div className="w-full max-w-lg text-center space-y-6">
-                <div className="h-24 w-24 rounded-full bg-green-100 flex items-center justify-center mx-auto animate-in zoom-in-90 duration-500">
-                    <CheckCircle className="h-12 w-12 text-green-600" />
-                </div>
+        <Dialog open={isOpen}>
+            <DialogContent className="sm:max-w-md">
+                <DialogHeader className="text-center">
+                    <div className="flex justify-center mb-2">
+                        <CheckCircle className="h-12 w-12 text-green-600" />
+                    </div>
+                    <DialogTitle className="text-2xl font-bold">Order Placed Successfully!</DialogTitle>
+                    <DialogDescription className="text-gray-600">
+                        {isSplit ? (
+                            <>
+                                Your cart was split into <strong>{ordersPlaced.length} separate orders</strong> due to multiple retailers.
+                                <p className="mt-1 text-sm text-gray-800 font-medium">Primary Order ID: #{primaryOrderId}</p>
+                            </>
+                        ) : (
+                            <>
+                                Your order has been successfully confirmed.
+                                <p className="mt-1 text-sm text-gray-800 font-medium">Order ID: #{primaryOrderId}</p>
+                            </>
+                        )}
+                    </DialogDescription>
+                </DialogHeader>
                 
-                <h1 className="4xl font-black text-gray-900 tracking-tight">Order Placed Successfully!</h1>
-                <p className="text-gray-600 text-lg">
-                    Thank you for your order. Your Cash on Delivery order <strong>#{orderId?.slice(-6) || 'COD-MOCK'}</strong> has been confirmed.
-                </p>
-                
-                <div className="pt-4 flex flex-col gap-3">
-                    <Link href={`/order/${orderId}`} passHref>
-                        <Button className="w-full py-3 rounded-xl bg-black text-white font-bold text-lg">
-                            View Order Details
-                        </Button>
-                    </Link>
-                    <Link href="/" passHref>
-                        <Button variant="outline" className="w-full py-3 rounded-xl font-bold text-lg">
-                            Continue Shopping
-                        </Button>
-                    </Link>
-                </div>
-            </div>
-        </div>
+                <DialogFooter>
+                    <Button 
+                        onClick={onClose} 
+                        className="w-full py-3 rounded-xl bg-black text-white font-bold text-lg hover:bg-gray-800"
+                    >
+                        Proceed to Order History
+                    </Button>
+                </DialogFooter>
+            </DialogContent>
+        </Dialog>
     );
 };
+
+
+// -----------------------------------------------------------
+// MOCK/INPUT COMPONENTS (Unchanged)
+// -----------------------------------------------------------
 
 const MockOtpModal = ({ isOtpModalOpen, handlePaymentFailure, otpTimer, mockOtp, otpInput, setOtpInput, handleOtpSubmit, loading, submissionError, finalPaymentMethod, userEmail }) => {
     const paymentMethod = finalPaymentMethod || '';

@@ -15,21 +15,30 @@ export default async function handler(req, res) {
   const userId = session.user._id;
 
   try {
-    let exists = false;
+    let existingReview = null;
     
     if (type === 'product') {
        const product = await Product.findById(targetId).select("reviews").lean();
        if (product && Array.isArray(product.reviews)) {
-         exists = product.reviews.some(r => String(r.userId) === String(userId));
+         // Find the specific review by the current user
+         existingReview = product.reviews.find(r => String(r.userId) === String(userId));
+         // Remove userId for cleaner return
+         if (existingReview) delete existingReview.userId;
        }
     } else if (type === 'retailer') {
        const retailer = await User.findById(targetId).select("Feedback").lean();
        if (retailer && Array.isArray(retailer.Feedback)) {
-         exists = retailer.Feedback.some(r => String(r.reviewerId) === String(userId));
+         // Find the specific feedback by the current user
+         existingReview = retailer.Feedback.find(r => String(r.reviewerId) === String(userId));
+         // Remove reviewerId for cleaner return
+         if (existingReview) delete existingReview.reviewerId;
        }
     }
 
-    return res.json({ exists });
+    return res.json({ 
+        exists: !!existingReview,
+        review: existingReview // Return the full review object if found
+    });
   } catch (e) {
     console.error("Review check error:", e);
     return res.status(500).json({ error: e.message });

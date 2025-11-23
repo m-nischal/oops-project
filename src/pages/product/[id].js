@@ -9,7 +9,7 @@ import ProductCard from "@/components/ProductCard";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Loader2, MapPinOff, Info, RefreshCw, MapPin, Truck, CheckCircle } from "lucide-react";
+import { Loader2, MapPinOff, Info, RefreshCw, MapPin, Truck, CheckCircle, MessageSquare, Star, Edit, Phone, Mail, Store } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -19,7 +19,25 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-
+import { Textarea } from "@/components/ui/textarea"; 
+import { Badge } from "@/components/ui/badge"; 
+import { 
+    Card, 
+    CardContent, 
+    CardHeader, 
+    CardTitle, 
+    CardDescription 
+} from "@/components/ui/card";
+import { 
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 
 /* Helpers */
 function sizeLabelOf(s) {
@@ -89,6 +107,21 @@ function getDisplayRating(product) {
   return { rating: 0.0, count: 0 }; 
 }
 
+// NEW HELPER: Get User ID from Token
+function getUserIdFromToken() {
+  if (typeof window === 'undefined') return null;
+  const token = localStorage.getItem("token");
+  if (!token) return null;
+  try {
+    const payload = JSON.parse(atob(token.split(".")[1]));
+    return payload.id || null;
+  } catch (e) {
+    return null;
+  }
+}
+
+// --- MAIN PAGE COMPONENT ---
+
 export default function ProductDetailPage() {
   const router = useRouter();
   const { id } = router.query;
@@ -115,7 +148,7 @@ export default function ProductDetailPage() {
   const [selectedSizeStock, setSelectedSizeStock] = useState(0);
   const [selectedProxyStock, setSelectedProxyStock] = useState(0); // Wholesaler Stock
   // NEW STATES FOR PROXY CHECK UI
-  const [localStock, setLocalStock] = useState(0); // Retailer Stock only (calculated)
+  const [localStock, setLocalStock] = useState(0); // Retailer's stock only (calculated)
   const [proxyCheckState, setProxyCheckState] = useState('initial'); // 'initial', 'checking', 'checked_available', 'checked_unavailable'
   
   const [qty, setQty] = useState(1);
@@ -136,12 +169,39 @@ export default function ProductDetailPage() {
   const [locationError, setLocationError] = useState(false);
   const [showLocationHelp, setShowLocationHelp] = useState(false);
   const [customerLocation, setCustomerLocation] = useState(null);
+
+  // --- REVIEW STATES (Product) ---
+  const [currentUserId, setCurrentUserId] = useState(null);
+  const [userReview, setUserReview] = useState(null);
+  const [isReviewModalOpen, setIsReviewModalOpen] = useState(false);
+  const [reviewRating, setReviewRating] = useState(5);
+  const [reviewComment, setReviewComment] = useState("");
+  const [isSubmittingReview, setIsSubmittingReview] = useState(false);
+  // FIX: Added missing state for overwrite confirmation
+  const [showOverwriteAlert, setShowOverwriteAlert] = useState(false); 
+  // -------------------------
+
+  // --- REVIEW STATES (Retailer) ---
+  const [retailerFeedback, setRetailerFeedback] = useState([]); // All retailer feedback
+  const [userRetailerReview, setUserRetailerReview] = useState(null); // User's specific retailer review
+  const [retailerReviewRating, setRetailerReviewRating] = useState(5);
+  const [retailerReviewComment, setRetailerReviewComment] = useState("");
+  const [isSubmittingRetailerReview, setIsSubmittingRetailerReview] = useState(false);
+  
+  const [isRetailerReviewModalOpen, setIsRetailerReviewModalOpen] = useState(false);
+  const [isRetailerReviewFormOpen, setIsRetailerReviewFormOpen] = useState(false); // <--- NEW STATE FOR FORM
+  const [showRetailerDeleteAlert, setShowRetailerDeleteAlert] = useState(false); // <--- NEW STATE FOR DELETE
+  // ------------------------------------
   
   const isProxyProduct = product?.wholesaleSourceId;
   const isLocalStockZeroOrLess = localStock <= 0;
 
+  // ****************************************************
+  // *********** HOISTED CALLBACK DEFINITIONS ***********
+  // ****************************************************
+
   // NEW HANDLER: For the Check Availability button
-  const handleCheckAvailability = () => {
+  const handleCheckAvailability = useCallback(() => {
       if (!isProxyProduct || !isLocalStockZeroOrLess) return;
       setProxyCheckState('checking');
 
@@ -157,19 +217,7 @@ export default function ProductDetailPage() {
               prevQtyRef.current = 0;
           }
       }, 500); // Simulate network delay
-  };
-
-  // Max quantity a user can select. Depends on proxyCheckState if locally out of stock.
-  const maxQtyLimit = useMemo(() => {
-      if (isProxyProduct && isLocalStockZeroOrLess) {
-          // If local stock is zero/less, limit to wholesaler stock only if checked AND available
-          if (proxyCheckState === 'checked_available') {
-              return selectedProxyStock;
-          }
-          return 0; // Cannot order before checking / if unavailable
-      }
-      return selectedSizeStock; // Use total available (local + proxy) if local stock is > 0
-  }, [isProxyProduct, isLocalStockZeroOrLess, proxyCheckState, selectedProxyStock, selectedSizeStock]);
+  }, [isProxyProduct, isLocalStockZeroOrLess, selectedProxyStock, qty]);
 
   // Fetch Retailer/Owner Data
   const fetchOwnerData = useCallback(async (ownerId) => {
@@ -177,17 +225,34 @@ export default function ProductDetailPage() {
         const res = await fetch(`/api/public/user/${ownerId}`); 
         if (res.ok) {
             const data = await res.json();
+            
+            // Store all feedback for modal display
+            setRetailerFeedback(data.feedback || []); 
+            
             setOwnerData({
                 ...data,
                 rating: data.reviewCount > 0 ? data.rating : 0.0,
-                reviewCount: data.reviewCount || 0
+                reviewCount: data.reviewCount || 0,
+                id: ownerId // Ensure ID is available on ownerData
             });
+
+            // Fetch logged-in user's specific retailer review
+            const userId = getUserIdFromToken();
+            if (userId) {
+                const checkRes = await fetch(`/api/reviews/check?type=retailer&targetId=${ownerId}`);
+                if (checkRes.ok) {
+                    const checkData = await checkRes.json();
+                    setUserRetailerReview(checkData.review || null);
+                }
+            }
         } else {
-            setOwnerData({ name: 'Unknown Retailer', rating: 0.0, reviewCount: 0 });
+            setOwnerData({ name: 'Unknown Retailer', rating: 0.0, reviewCount: 0, id: ownerId });
+            setRetailerFeedback([]);
         }
     } catch (e) {
         console.error("Failed to fetch owner data:", e);
-        setOwnerData({ name: 'Unknown Retailer', rating: 0.0, reviewCount: 0 });
+        setOwnerData({ name: 'Unknown Retailer', rating: 0.0, reviewCount: 0, id: ownerId });
+        setRetailerFeedback([]);
     }
   }, []);
 
@@ -207,8 +272,7 @@ export default function ProductDetailPage() {
     } finally {
       setSimilarLoading(false);
     }
-  }, []);
-
+  }, []); // <-- THIS WAS MISSING useCallback in the error case
 
   const fetchDeliveryEstimate = useCallback(async (productId, location) => {
       setDeliveryEstimate(null);
@@ -285,6 +349,195 @@ export default function ProductDetailPage() {
         }
     );
   }, []);
+  
+  // 3. New Click Handler for Retailer Info (VIEWER ONLY)
+  const handleRetailerInfoClick = () => {
+    if (!ownerData) return; 
+    // Simply open the main modal to view all feedback
+    setIsRetailerReviewModalOpen(true);
+  };
+  
+  // New Handler to open the Review Form Modal
+  const handleOpenRetailerReviewForm = (isEditing) => {
+    if (!currentUserId) {
+        alert("Please log in to leave a review.");
+        router.push("/login");
+        return;
+    }
+    
+    // Pre-populate if editing
+    if (isEditing && userRetailerReview) {
+        setRetailerReviewRating(userRetailerReview.rating);
+        setRetailerReviewComment(userRetailerReview.comment);
+    } else {
+        setRetailerReviewRating(5);
+        setRetailerReviewComment("");
+    }
+    
+    setIsRetailerReviewFormOpen(true);
+    setIsRetailerReviewModalOpen(false); // Close main modal if open
+  }
+
+  // New Delete Handler for Retailer Review
+  const handleDeleteRetailerReview = async () => {
+    if (!ownerData || !currentUserId) return;
+
+    setIsSubmittingRetailerReview(true);
+    setShowRetailerDeleteAlert(false); // Close alert once confirmed
+    try {
+        const token = localStorage.getItem("token");
+        if (!token) throw new Error("Not authenticated.");
+
+        // --- MOCK DELETE IMPLEMENTATION: Post empty review to clear it ---
+        // This relies on the server-side API to overwrite the existing review
+        const res = await fetch("/api/reviews/retailer", {
+            method: "POST", 
+            headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
+            body: JSON.stringify({ 
+                retailerId: ownerData.id, 
+                rating: 0, // Clear the rating
+                comment: "" // Clear the comment
+            }),
+        });
+
+        if (!res.ok) throw new Error("Failed to delete retailer review.");
+        
+        alert("Retailer review deleted successfully.");
+        
+        // Reload page to refresh all reviews/stats
+        window.location.reload(); 
+
+    } catch (e) {
+        alert(e.message);
+    } finally {
+        setIsSubmittingRetailerReview(false);
+    }
+  };
+
+
+  // 4. New Submit Handler for Retailer Review
+  const handleRetailerReviewSubmit = async () => {
+    if (!ownerData || !currentUserId) return;
+
+    setIsSubmittingRetailerReview(true);
+    try {
+        const token = localStorage.getItem("token");
+        if (!token) throw new Error("Not authenticated.");
+
+        const res = await fetch("/api/reviews/retailer", {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
+            body: JSON.stringify({ 
+                retailerId: ownerData.id, 
+                rating: retailerReviewRating, 
+                comment: retailerReviewComment 
+            }),
+        });
+
+        if (!res.ok) throw new Error("Failed to submit retailer review.");
+
+        alert(userRetailerReview ? "Retailer review updated successfully!" : "Retailer review submitted successfully!");
+        setIsRetailerReviewFormOpen(false); // Close the form modal
+        
+        // Reload page to refresh all reviews/stats
+        window.location.reload(); 
+
+    } catch (e) {
+        alert(e.message);
+    } finally {
+        setIsSubmittingRetailerReview(false);
+    }
+  };
+
+
+  // --- Existing Product Review Handlers ---
+  const handleWriteReview = (isEditing) => {
+    if (!currentUserId) {
+        alert("Please log in to leave a review.");
+        router.push("/login");
+        return;
+    }
+    
+    // Pre-populate if editing
+    if (isEditing && userReview) {
+        setReviewRating(userReview.rating);
+        setReviewComment(userReview.comment);
+    } else {
+        setReviewRating(5);
+        setReviewComment("");
+    }
+    
+    setIsReviewModalOpen(true);
+  };
+
+  const performReviewSubmit = async () => {
+    setIsSubmittingReview(true);
+    try {
+        const token = localStorage.getItem("token");
+        if (!token) throw new Error("Not authenticated.");
+
+        const res = await fetch("/api/reviews/product", {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
+            body: JSON.stringify({ 
+                productId: product._id, 
+                rating: reviewRating, 
+                comment: reviewComment 
+            }),
+        });
+
+        if (!res.ok) throw new Error("Failed to submit review.");
+
+        alert(userReview ? "Review updated successfully!" : "Review submitted successfully!");
+        setIsReviewModalOpen(false);
+        setShowOverwriteAlert(false); // Close overwrite alert if it was open
+        
+        // Simple reload to refresh all data, including reviews
+        window.location.reload(); 
+
+    } catch (e) {
+        alert(e.message);
+    } finally {
+        setIsSubmittingReview(false);
+    }
+  };
+  
+  const handleInitialSubmit = () => {
+    // Determine if review exists based on cached data
+    const existing = userReview;
+    
+    // We only use the single overwrite dialog for simplicity.
+    if (existing) {
+      // The performReviewSubmit function will handle the actual product/retailer POST
+      setShowOverwriteAlert(true); 
+    } else {
+      performReviewSubmit();
+    }
+  };
+  // ----------------------------------------
+  
+  // ****************************************************
+  // *********** END HOISTED CALLBACK DEFINITIONS *******
+  // ****************************************************
+
+  // CRITICAL FIX: Define maxQtyLimit here
+  const maxQtyLimit = useMemo(() => {
+    // If not a proxy product OR if local stock is available (> 0)
+    if (!isProxyProduct || localStock > 0) {
+      return selectedSizeStock; 
+    }
+
+    // If it is a proxy product AND local stock is zero/negative:
+    if (proxyCheckState === 'checked_available') {
+      // Use the available proxy stock (wholesaler stock)
+      return selectedProxyStock;
+    } 
+    
+    // If check hasn't happened or failed, limit orderable quantity to 0.
+    return 0;
+  }, [isProxyProduct, localStock, selectedSizeStock, selectedProxyStock, proxyCheckState]);
+  
+  // Note: The variable maxAvailableForUI is removed to fix the redeclaration error.
 
 
   // --- Effect to load product & handle location listeners ---
@@ -292,69 +545,79 @@ export default function ProductDetailPage() {
     if (!id) return;
     let cancelled = false;
 
-    async function load() {
-      setLoading(true);
-      try {
-        const res = await fetch(`/api/products/${id}`);
-        if (!res.ok) { setProduct(null); return; }
-        const json = await res.json();
-        const p = json && json.product ? json.product : json;
-        if (cancelled) return;
-        setProduct(p);
+    // 1. Set User ID
+    const userId = getUserIdFromToken();
+    setCurrentUserId(userId); 
+
+    async function fetchProductData() {
+        setLoading(true);
+        try {
+            const res = await fetch(`/api/products/${id}`);
+            if (!res.ok) { setProduct(null); throw new Error("Not found"); }
+            return await res.json();
+        } finally {
+             if (!cancelled) setLoading(false);
+        }
+    }
+    
+    // Updated main load block
+    (async () => {
+        const json = await fetchProductData();
+        if (cancelled || !json) return;
         
-        if (p.ownerId) {
-            fetchOwnerData(p.ownerId);
+        const p = json.product;
+        setProduct(p);
+
+        // 2. Check for existing product review and set userReview
+        if (userId && p.reviews) {
+            const existing = p.reviews.find(r => String(r.userId) === String(userId));
+            setUserReview(existing || null); // <-- Cache the user's review
+        } else {
+            setUserReview(null);
         }
         
-        // Fetch similar products after getting the main product data
+        if (p.ownerId) {
+            fetchOwnerData(p.ownerId); // This now fetches *all* retailer feedback
+        }
+        
         if (p.tags && p.tags.length > 0) {
             fetchSimilarProducts(p._id, p.tags);
         }
-
 
         setMainImage(p.images && p.images[0] ? p.images[0] : "/images/placeholder.png");
 
         const sizes = p?.sizes || [];
         const initialSize = sizes && sizes.length ? sizes[0] : null;
-        const initialSizeLabel = initialSize ? sizeLabelOf(initialSize) : null;
 
-        // Default stock is now totalAvailable (local + proxy)
-        let defaultTotalStock = initialSize ? Number(initialSize.totalAvailable ?? initialSize.stock ?? 0) : totalStockFrom(p);
-        let defaultProxy = initialSize ? Number(initialSize.proxyStock || 0) : 0;
-        let defaultLocal = defaultTotalStock - defaultProxy; // CALCULATE LOCAL STOCK
-        
-        let defaultQty = 1;
-
-        if (initialSizeLabel) {
-            const currentCartItem = getCartItem(p._id, initialSizeLabel);
-            if (currentCartItem) {
-                defaultQty = currentCartItem.qty; 
-            }
-        }
-        
-        // Final state setup
         if (initialSize) {
+          const initialSizeLabel = sizeLabelOf(initialSize);
+          const defaultTotalStock = Number(initialSize.totalAvailable ?? initialSize.stock ?? 0);
+          const defaultProxy = Number(initialSize.proxyStock || 0);
+          const defaultLocal = defaultTotalStock - defaultProxy;
+          
           setSelectedSize(initialSizeLabel);
           setSelectedSizeStock(defaultTotalStock);
           setSelectedProxyStock(defaultProxy);
-          setLocalStock(defaultLocal); // SET LOCAL STOCK
-          setProxyCheckState(defaultLocal > 0 ? 'checked_available' : 'initial'); // Pre-check if local stock exists
+          setLocalStock(defaultLocal);
+          setProxyCheckState(defaultLocal > 0 ? 'checked_available' : 'initial');
+          
+          const currentCartItem = getCartItem(p._id, initialSizeLabel);
+          const defaultQty = currentCartItem ? currentCartItem.qty : 1;
+          setQty(defaultQty); 
+          prevQtyRef.current = defaultQty;
         } else {
           setSelectedSize(null);
-          setSelectedSizeStock(defaultTotalStock);
+          setSelectedSizeStock(totalStockFrom(p));
           setSelectedProxyStock(0);
-          setLocalStock(0); // SET LOCAL STOCK
+          setLocalStock(totalStockFrom(p));
           setProxyCheckState('initial');
+          setQty(1);
+          prevQtyRef.current = 1;
         }
-        
-        setQty(defaultQty); 
-        prevQtyRef.current = defaultQty;
         
         setSizeImage(sizeChartImageFor(p));
         
-        // --- Init Location ---
         const handleLocationUpdate = () => fetchAndSaveLocation(p);
-        
         fetchAndSaveLocation(p); // Initial call
         window.addEventListener("livemart-location-update", handleLocationUpdate);
         
@@ -362,15 +625,7 @@ export default function ProductDetailPage() {
             cancelled = true; 
             window.removeEventListener("livemart-location-update", handleLocationUpdate);
         };
-      } catch (err) {
-        console.error("Failed to load product:", err);
-        setProduct(null);
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    }
-    load();
-    
+    })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id, fetchOwnerData, fetchSimilarProducts, fetchAndSaveLocation]);
   
@@ -459,7 +714,7 @@ export default function ProductDetailPage() {
   
   function incrementQty() {
     const newQty = Number(qty || 0) + 1;
-    const maxStock = maxQtyLimit; // Use the derived limit
+    const maxStock = maxQtyLimit;
     
     if (newQty > maxStock) {
         alert(`Only ${maxStock} units available in total.`);
@@ -545,8 +800,6 @@ export default function ProductDetailPage() {
 
   // --- END FIXED QTY HANDLERS ---
   
-  // NOTE: getDeliveryDate removed, deliveryData useMemo used instead.
-  
   const showDeliveryWarning = locationError && !loading;
 
   if (loading) return <>
@@ -564,11 +817,9 @@ export default function ProductDetailPage() {
   const displayRating = getDisplayRating(product);
   
   // Use maxQtyLimit for UI max (it's 0 if check not done/unavailable)
-  const maxAvailableForUI = maxQtyLimit; 
-
-  const incrementDisabled = qty >= maxAvailableForUI;
+  const incrementDisabled = qty >= maxQtyLimit; 
   const decrementDisabled = qty <= 1;
-  const isOutOfStock = maxAvailableForUI <= 0 && proxyCheckState !== 'initial'; // Out of stock if the limit is 0 AND we've checked.
+  const isOutOfStock = maxQtyLimit <= 0 && proxyCheckState !== 'initial'; 
   
   // Disable add to cart if we are waiting for a check AND local stock is zero
   const isAddToCartDisabled = isProxyProduct && isLocalStockZeroOrLess && proxyCheckState !== 'checked_available';
@@ -664,11 +915,18 @@ export default function ProductDetailPage() {
                       <span className="font-semibold text-black">Brand: </span> {product.brand || 'N/A'}
                   </p>
               </div>
+              
+              {/* RETAILER INFO BLOCK (MADE CLICKABLE) */}
               <div className="flex justify-between items-center">
                   <p className="text-gray-500 text-lg">
                       <span className="font-semibold text-black">Sold by: </span> {retailerName}
                   </p>
-                  <div className="flex items-center">
+                  
+                  {/* Make the entire rating/review count area clickable */}
+                  <div 
+                     className={`flex items-center cursor-pointer ${retailerReviewCount > 0 ? 'hover:bg-gray-100 p-1 rounded-lg transition-colors' : ''}`}
+                     onClick={handleRetailerInfoClick}
+                  >
                       <StarRating 
                           rating={retailerRating} 
                           reviewCount={retailerReviewCount} 
@@ -679,6 +937,7 @@ export default function ProductDetailPage() {
                       <span className="text-sm text-gray-500 ml-1">({retailerRating.toFixed(1)}/5)</span>
                   </div>
               </div>
+              {/* END RETAILER INFO BLOCK */}
             </div>
             
             {/* Price & Discount (unchanged) */}
@@ -768,7 +1027,7 @@ export default function ProductDetailPage() {
                               <Loader2 className="h-4 w-4 animate-spin mr-2" /> Checking availability...
                            </div>
                         ) : (
-                          /* State 2b: Availability checked */
+                          /* Result 2b: Availability checked */
                           <>
                             {selectedProxyStock > 0 ? (
                               /* Result 2b-i: Stock available at wholesaler */
@@ -927,7 +1186,7 @@ export default function ProductDetailPage() {
         </div >
       </main>
 
-      {/* --- Toggle Buttons and Content Area (unchanged) --- */}
+      {/* --- Toggle Buttons and Content Area --- */}
       <div className="max-w-[1440px] mx-auto px-6 py-10">
           
           {/* Toggle Buttons evenly spaced */}
@@ -958,7 +1217,12 @@ export default function ProductDetailPage() {
           )}
           
           {activeTab === 'reviews' && (
-              <ReviewsTab product={product} displayRating={displayRating} />
+              <ReviewsTab 
+                  product={product} 
+                  displayRating={displayRating} 
+                  userReview={userReview}
+                  onWriteReview={handleWriteReview}
+              />
           )}
           
           {activeTab === 'similar' && (
@@ -967,6 +1231,265 @@ export default function ProductDetailPage() {
           
       </div>
 
+      {/* --- RETAILER REVIEWS MODAL (VIEWER) --- */}
+      <Dialog open={isRetailerReviewModalOpen} onOpenChange={setIsRetailerReviewModalOpen}>
+            <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto">
+                <DialogHeader>
+                    <DialogTitle className="text-2xl">Retailer Profile: {retailerName}</DialogTitle>
+                    <DialogDescription>
+                        Customer feedback on this seller and their service.
+                    </DialogDescription>
+                </DialogHeader>
+
+                {/* Seller Rating Summary */}
+                <div className="flex items-center space-x-4 pb-4 border-b border-gray-100">
+                    <span className="text-4xl font-bold text-black">{retailerRating.toFixed(1)}/5</span>
+                    <StarRating rating={retailerRating} reviewCount={retailerReviewCount} starSize="h-6 w-6" />
+                </div>
+                
+                {/* WRITE/EDIT/DELETE REVIEW BUTTON BLOCK (ENFORCES BUYER/REVIEWER ONLY) */}
+                {currentUserId && (
+                   <div className="flex justify-between items-center gap-3 pb-2 border-t border-gray-100 pt-4">
+                       <p className="text-sm text-gray-500">
+                         {userRetailerReview 
+                             ? "Your submitted review is visible to the public."
+                             : "Only verified buyers of this retailer can submit/edit reviews." // Updated message
+                         }
+                       </p>
+                       
+                       {userRetailerReview ? (
+                           <div className="flex gap-3">
+                               <Button 
+                                   variant="destructive" 
+                                   size="sm"
+                                   onClick={() => setShowRetailerDeleteAlert(true)}
+                               >
+                                   Delete Review
+                               </Button>
+                               <Button 
+                                   variant="default" 
+                                   size="sm"
+                                   onClick={() => handleOpenRetailerReviewForm(true)}
+                               >
+                                   <Edit className="h-4 w-4 mr-1" /> Edit Review
+                               </Button>
+                           </div>
+                       ) : null}
+                   </div>
+                )}
+
+                {/* All Reviews List */}
+                <h3 className="font-bold text-lg pt-4 pb-2">All Customer Feedback ({retailerFeedback.length})</h3>
+                <div className="space-y-4 max-h-60 overflow-y-auto pr-2">
+                    {retailerFeedback.length === 0 ? (
+                        <p className="text-muted-foreground text-center py-4">No feedback available for this retailer yet.</p>
+                    ) : (
+                        retailerFeedback.map((feedback, index) => {
+                            // Heuristic to identify current user's review for badge display (since reviewerId is stripped from public API)
+                            const isUserReview = userRetailerReview && feedback.comment === userRetailerReview.comment && feedback.author === userRetailerReview.author;
+
+                            return (
+                                <div key={index} className={`p-4 border rounded-lg bg-white ${isUserReview ? 'border-blue-500 ring-1 ring-blue-200' : ''}`}>
+                                    <div className="flex justify-between items-start">
+                                        <div className="font-bold text-sm flex items-center">
+                                            {feedback.author || 'Anonymous'}
+                                            {isUserReview && <Badge className="ml-2 bg-blue-500 hover:bg-blue-600 text-white text-xs">You</Badge>}
+                                        </div>
+                                    </div>
+                                    <StarRating rating={feedback.rating} starSize="h-3 w-3" className="mt-1" />
+                                    <p className="text-sm text-gray-700 mt-2">{feedback.comment}</p>
+                                    <p className="text-xs text-muted-foreground mt-2">Posted on {new Date(feedback.createdAt).toLocaleDateString()}</p>
+                                </div>
+                            );
+                        })
+                    )}
+                </div>
+
+                <DialogFooter>
+                    <Button
+                        variant="outline"
+                        onClick={() => setIsRetailerReviewModalOpen(false)}
+                    >
+                        Close
+                    </Button>
+                </DialogFooter>
+            </DialogContent>
+        </Dialog>
+      {/* ------------------------ */}
+
+      {/* --- RETAILER REVIEW FORM MODAL (NEW) --- */}
+      <Dialog open={isRetailerReviewFormOpen} onOpenChange={setIsRetailerReviewFormOpen}>
+            <DialogContent className="sm:max-w-md">
+                <DialogHeader>
+                    <DialogTitle>{userRetailerReview ? "Edit Your Review" : "Write a Review"}</DialogTitle>
+                    <DialogDescription>
+                        Share your experience with <strong>{retailerName}</strong>
+                    </DialogDescription>
+                </DialogHeader>
+
+                <div className="flex justify-center gap-2 py-4">
+                    {[1, 2, 3, 4, 5].map((star) => (
+                        <Star
+                            key={star}
+                            className={`h-8 w-8 cursor-pointer transition-all ${
+                                star <= retailerReviewRating
+                                    ? "text-yellow-400 fill-yellow-400 scale-110"
+                                    : "text-gray-300 hover:text-yellow-200"
+                            }`}
+                            onClick={() => setRetailerReviewRating(star)}
+                        />
+                    ))}
+                </div>
+
+                <div className="space-y-2">
+                    <label className="text-sm font-medium text-gray-700">
+                        Your Comments
+                    </label>
+                    <Textarea
+                        placeholder={"Share your experience with the retailer (e.g., shipping, communication)."}
+                        value={retailerReviewComment}
+                        onChange={(e) => setRetailerReviewComment(e.target.value)}
+                        rows={4}
+                    />
+                </div>
+
+                <DialogFooter>
+                    <Button
+                        variant="outline"
+                        onClick={() => setIsRetailerReviewFormOpen(false)}
+                    >
+                        Cancel
+                    </Button>
+                    <Button
+                        onClick={handleRetailerReviewSubmit}
+                        disabled={isSubmittingRetailerReview || retailerReviewComment.length < 5}
+                        className="bg-black text-white"
+                    >
+                        {isSubmittingRetailerReview ? (
+                            <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                        ) : (
+                            <MessageSquare className="h-4 w-4 mr-2" />
+                        )}
+                        {userRetailerReview ? "Update Review" : "Submit Review"}
+                    </Button>
+                </DialogFooter>
+            </DialogContent>
+        </Dialog>
+      {/* ------------------------ */}
+
+      {/* OVERWRITE CONFIRMATION ALERT (PRODUCT) */}
+      <AlertDialog
+        open={showOverwriteAlert}
+        onOpenChange={setShowOverwriteAlert}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Overwrite Review?</AlertDialogTitle>
+            <AlertDialogDescription>
+              You have already reviewed this product. Submitting a new
+              review will overwrite your previous rating and comment.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => setShowOverwriteAlert(false)}>
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={performReviewSubmit}
+              className="bg-black text-white"
+            >
+              Yes, Overwrite
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+      
+      {/* DELETE CONFIRMATION ALERT (RETAILER - NEW) */}
+      <AlertDialog
+        open={showRetailerDeleteAlert}
+        onOpenChange={setShowRetailerDeleteAlert}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="text-red-600">Confirm Deletion</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to permanently delete your review for **{retailerName}**? This cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => setShowRetailerDeleteAlert(false)}>
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleDeleteRetailerReview}
+              className="bg-red-600 hover:bg-red-700"
+            >
+              Yes, Delete Review
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+
+      {/* --- NEW REVIEW MODAL (Product) --- */}
+      <Dialog open={isReviewModalOpen} onOpenChange={setIsReviewModalOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>{userReview ? "Edit Your Review" : "Write a Review"}</DialogTitle>
+            <DialogDescription>
+              Share your experience with <strong>{product.name}</strong>
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="flex justify-center gap-2 py-4">
+            {[1, 2, 3, 4, 5].map((star) => (
+              <Star
+                key={star}
+                className={`h-8 w-8 cursor-pointer transition-all ${
+                  star <= reviewRating
+                    ? "text-yellow-400 fill-yellow-400 scale-110"
+                    : "text-gray-300 hover:text-yellow-200"
+                }`}
+                onClick={() => setReviewRating(star)}
+              />
+            ))}
+          </div>
+
+          <div className="space-y-2">
+            <label className="text-sm font-medium text-gray-700">
+              Your Comments
+            </label>
+            <Textarea
+              placeholder={"How is the quality? Does it fit well?"}
+              value={reviewComment}
+              onChange={(e) => setReviewComment(e.target.value)}
+              rows={4}
+            />
+          </div>
+
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setIsReviewModalOpen(false)}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={handleInitialSubmit}
+              disabled={isSubmittingReview}
+              className="bg-black text-white"
+            >
+              {isSubmittingReview ? (
+                <Loader2 className="h-4 w-4 animate-spin mr-2" />
+              ) : (
+                <MessageSquare className="h-4 w-4 mr-2" />
+              )}
+              {userReview ? "Update Review" : "Submit Review"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      {/* ------------------------ */}
 
       {/* Size Chart Modal (unchanged) */}
       <SizeChartModal
@@ -1156,40 +1679,79 @@ function ProductDetailsTab({ product }) {
     );
 }
 
-function ReviewsTab({ product, displayRating }) {
+function ReviewsTab({ product, displayRating, userReview, onWriteReview }) {
     // FIX: Guard clause for null product object
     if (!product) return null;
 
-    const reviews = product.reviews || [];
-
-    if (reviews.length === 0) {
-        return (
-            <div className="py-10 text-center text-muted-foreground">
-                <h2 className="text-xl font-bold">No reviews yet.</h2>
-                <p>Be the first to review this product!</p>
-            </div>
-        );
-    }
+    const reviews = (product.reviews || []).filter(r => String(r.comment).trim().length > 0); // Only show comments
     
-    // Display summary and list reviews
+    // Sort reviews: put the user's review first, if it exists and has a comment
+    const sortedReviews = [...reviews].sort((a, b) => {
+        const isAUser = userReview && a.userId && String(a.userId) === String(userReview.userId);
+        const isBUser = userReview && b.userId && String(b.userId) === String(userReview.userId);
+        if (isAUser) return -1; // Move user review to top
+        if (isBUser) return 1;
+        return new Date(b.createdAt) - new Date(a.createdAt); // Sort others by newest
+    });
+
     return (
         <div className="py-4">
             <h2 className="text-xl font-bold mb-4">Customer Rating Summary</h2>
-            <div className="flex items-center space-x-4 mb-8">
-                <span className="text-4xl font-bold text-black">{displayRating.rating.toFixed(1)}/5</span>
-                <StarRating rating={displayRating.rating} reviewCount={displayRating.count} starSize="h-6 w-6" />
+            
+            <div className="flex justify-between items-center pb-6 border-b border-gray-100 mb-6">
+                <div className="flex items-center space-x-4">
+                    <span className="text-4xl font-bold text-black">{displayRating.rating.toFixed(1)}/5</span>
+                    <StarRating rating={displayRating.rating} reviewCount={displayRating.count} starSize="h-6 w-6" />
+                </div>
+                
+                
+                {/* --- Review Button: REMOVED to enforce post-purchase review flow --- */}
+                {/* {userReview ? ( 
+                    <Button variant="default" onClick={() => onWriteReview(true)}>Edit Your Review</Button> 
+                ) : (
+                    <Button variant="outline" onClick={() => onWriteReview(false)}>Write a Review</Button>
+                )} */}
+                {/* -------------------- */}
+
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                {reviews.map((review, index) => (
-                    <div key={review._id || index} className="p-4 border rounded-lg">
-                        <div className="font-bold text-sm">{review.author || 'Anonymous'}</div>
-                        <StarRating rating={review.rating} starSize="h-3 w-3" className="mt-1" />
-                        <p className="text-xs text-gray-500 mt-2">{review.comment}</p>
-                        <p className="text-xs text-muted-foreground mt-2">Posted on {new Date(review.createdAt).toLocaleDateString()}</p>
-                    </div>
-                ))}
-            </div>
+            {sortedReviews.length === 0 ? (
+                 <div className="py-10 text-center text-muted-foreground">
+                    <h2 className="text-xl font-bold">No reviews yet.</h2>
+                    <p>Be the first to review this product!</p>
+                </div>
+            ) : (
+                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    {sortedReviews.map((review, index) => {
+                        const isUserReview = userReview && review.userId && String(review.userId) === String(userReview.userId);
+                        
+                        return (
+                            <div key={review._id || index} className={`p-4 border rounded-lg ${isUserReview ? 'border-blue-500 bg-blue-50/50' : 'bg-white'}`}>
+                                <div className="flex justify-between items-start">
+                                    <div className="font-bold text-sm flex items-center">
+                                        {review.author || 'Anonymous'}
+                                        {isUserReview && <Badge className="ml-2 bg-blue-500 hover:bg-blue-600 text-white text-xs">You</Badge>}
+                                    </div>
+                                    {/* --- RETAINED: The small 'Edit' button on the user's specific review item --- */}
+                                    {isUserReview && (
+                                         <Button 
+                                             variant="ghost" 
+                                             size="sm" 
+                                             className="h-auto p-1.5 text-xs text-blue-600 hover:text-blue-700"
+                                             onClick={() => onWriteReview(true)} // Pass true for editing
+                                         >
+                                            Edit
+                                         </Button>
+                                    )}
+                                </div>
+                                <StarRating rating={review.rating} starSize="h-3 w-3" className="mt-1" />
+                                <p className="text-sm text-gray-700 mt-2">{review.comment}</p>
+                                <p className="text-xs text-muted-foreground mt-2">Posted on {new Date(review.createdAt).toLocaleDateString()}</p>
+                            </div>
+                        );
+                    })}
+                </div>
+            )}
         </div>
     );
 }

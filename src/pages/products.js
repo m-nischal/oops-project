@@ -1,3 +1,4 @@
+// src/pages/products.js
 import React, {
   useEffect,
   useState,
@@ -32,17 +33,26 @@ import { Separator } from "@/components/ui/separator";
 // --- CONFIGURATION ---
 const CATEGORIES = ["Men", "Women", "Boys", "Girls", "Unisex"];
 const STYLES = ["Casual", "Formal", "Party", "Gym"];
+const DEBOUNCE_DELAY = 300;
 
 // --- CUSTOM DUAL RANGE SLIDER ---
-const DualRangeSlider = ({ min, max, onChange }) => {
-  const [minVal, setMinVal] = useState(min);
-  const [maxVal, setMaxVal] = useState(max);
-  const minValRef = useRef(min);
-  const maxValRef = useRef(max);
+const DualRangeSlider = ({ min, max, initialMin, initialMax, onChange }) => {
+  // FIX: Initialize state directly from props. The component's key now handles re-initialization.
+  const [minVal, setMinVal] = useState(initialMin);
+  const [maxVal, setMaxVal] = useState(initialMax);
+  const minValRef = useRef(initialMin);
+  const maxValRef = useRef(initialMax);
   const range = useRef(null);
+
+  // Update ref's when internal state changes (for visual tracking)
+  useEffect(() => {
+    minValRef.current = minVal;
+    maxValRef.current = maxVal;
+  }, [minVal, maxVal]);
 
   const getPercent = useCallback(
     (value) => {
+      if (max <= min) return 0;
       return Math.round(((value - min) / (max - min)) * 100);
     },
     [min, max]
@@ -69,12 +79,17 @@ const DualRangeSlider = ({ min, max, onChange }) => {
     }
   }, [maxVal, getPercent]);
 
+  // Final value propagation (runs when internal state changes)
   useEffect(() => {
-    onChange([minVal, maxVal]);
-  }, [minVal, maxVal, onChange]);
+    // Only call onChange if the slider bounds are initialized
+    if (max > min) {
+      onChange([minVal, maxVal]);
+    }
+  }, [minVal, maxVal, onChange, max, min]);
 
   return (
-    <div className="relative w-full flex items-center justify-center h-10">
+    // FIX: Ensure container has relative positioning for range track to work
+    <div className="relative w-full flex items-center justify-center h-10 px-1"> 
       {/* Input 1: Min Value */}
       <input
         type="range"
@@ -87,7 +102,7 @@ const DualRangeSlider = ({ min, max, onChange }) => {
           minValRef.current = value;
         }}
         className="thumb thumb--left"
-        style={{ zIndex: minVal > max - 100 && "5" }}
+        style={{ zIndex: minVal > max - 100 ? "5" : "3" }} // Ensure thumb is above the other at edges
       />
 
       {/* Input 2: Max Value */}
@@ -117,37 +132,34 @@ const DualRangeSlider = ({ min, max, onChange }) => {
       </div>
 
       <style jsx>{`
-        /* Remove default appearance for all range inputs */
-        input[type="range"] {
+        /* FIX: Apply styles to prevent thumb overflow and ensure correct stacking */
+        .thumb {
           -webkit-appearance: none;
           -moz-appearance: none;
           pointer-events: none;
           position: absolute;
           height: 0;
           width: 100%;
-          outline: none;
           background: transparent;
           z-index: 3;
+          margin: 0; /* Override default margin */
         }
-
-        /* Webkit (Chrome/Safari/Edge) Thumb */
-        input[type="range"]::-webkit-slider-thumb {
+        
+        .thumb::-webkit-slider-thumb {
           -webkit-appearance: none;
           background-color: white;
-          border: 2px solid black; /* Darker border for visibility */
+          border: 2px solid black; 
           border-radius: 50%;
           box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
           cursor: pointer;
           height: 20px;
           width: 20px;
-          margin-top: 0px;
+          margin-top: 0px; 
           pointer-events: auto;
           position: relative;
-          top: 0px; /* Aligned with track via flex container */
         }
 
-        /* Firefox Thumb */
-        input[type="range"]::-moz-range-thumb {
+        .thumb::-moz-range-thumb {
           background-color: white;
           border: 2px solid black;
           border-radius: 50%;
@@ -157,18 +169,11 @@ const DualRangeSlider = ({ min, max, onChange }) => {
           width: 20px;
           pointer-events: auto;
           position: relative;
-          transform: none;
         }
-
-        /* Hide Default Tracks completely */
-        input[type="range"]::-webkit-slider-runnable-track {
-          -webkit-appearance: none;
-          box-shadow: none;
-          border: none;
-          background: transparent;
-        }
-        input[type="range"]::-moz-range-track {
-          -moz-appearance: none;
+        
+        /* Hide tracks */
+        .thumb::-webkit-slider-runnable-track,
+        .thumb::-moz-range-track {
           box-shadow: none;
           border: none;
           background: transparent;
@@ -178,7 +183,7 @@ const DualRangeSlider = ({ min, max, onChange }) => {
   );
 };
 
-// --- HELPER COMPONENTS ---
+// --- HELPER COMPONENTS (rest remain the same) ---
 
 const FilterSection = ({
   title,
@@ -250,19 +255,27 @@ export default function ProductsPage() {
   const router = useRouter();
   const { categoryId, q, tag, lat, lng, radius, sort } = router.query;
 
+  // --- State Declarations (Moved to the top to ensure definition before use) ---
   const [products, setProducts] = useState([]);
   const [filteredProducts, setFilteredProducts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [total, setTotal] = useState(0);
 
-  const [priceRange, setPriceRange] = useState([0, 1000]);
-  const [sliderBounds, setSliderBounds] = useState({ min: 0, max: 1000 });
+  // Initialize sortOption based on query/location
   const [sortOption, setSortOption] = useState(
     radius ? "distance" : "most-popular"
   );
   const [page, setPage] = useState(1);
+  
+  // Price States
+  const [priceRange, setPriceRange] = useState([0, 1000]); // Transient slider value
+  const [debouncedPriceRange, setDebouncedPriceRange] = useState([0, 1000]); // Value used for actual filtering
+  const [sliderBounds, setSliderBounds] = useState({ min: 0, max: 1000 }); // Absolute min/max from API
+  
   const [userLocation, setUserLocation] = useState(null);
+  // ---------------------------------------------
 
+  // 1. Initial/URL/Location Sync
   useEffect(() => {
     if (typeof window !== "undefined") {
       const savedLoc = localStorage.getItem("livemart_active_location");
@@ -276,44 +289,9 @@ export default function ProductsPage() {
     }
   }, []);
 
-  // --- PARTIAL MATCH DETECTION LOGIC ---
-  const isPartialMatch = useMemo(() => {
-    if (!q || products.length === 0) return false;
-
-    // 1. Split Query into terms
-    const terms = q
-      .trim()
-      .toLowerCase()
-      .split(/\s+/)
-      .filter((t) => t.length > 0);
-    if (terms.length < 2) return false; // Single word search is effectively 'exact' or broad enough
-
-    // 2. Check if ANY product matches ALL terms
-    const hasExactMatch = products.some((product) => {
-      const productText = [
-        product.name,
-        product.description,
-        product.brand,
-        product.category,
-        ...(product.tags || []),
-      ]
-        .join(" ")
-        .toLowerCase();
-
-      // Check if EVERY term exists in the product text
-      return terms.every((term) => {
-        // Soft match: remove trailing 's' to match "shirt" with "shirts"
-        const root = term.replace(/('s|s)$/, "");
-        return productText.includes(root);
-      });
-    });
-
-    // If no product matches ALL terms, it's a partial match result set
-    return !hasExactMatch;
-  }, [q, products]);
-
   useEffect(() => {
     if (!router.isReady) return;
+    // This effect is now safe because sortOption is already initialized above.
     if (sort) {
       setSortOption(sort);
     } else if (radius) {
@@ -322,6 +300,61 @@ export default function ProductsPage() {
       setSortOption("most-popular");
     }
   }, [router.isReady, sort, radius]);
+  
+  // 2. Debounce handler for price range filtering
+  const handlePriceRangeChange = useCallback((newRange) => {
+      // Immediate update for slider smoothness
+      setPriceRange(newRange); 
+  }, []);
+
+  // Debounce effect for filtering
+  useEffect(() => {
+      const handler = setTimeout(() => {
+          // Only trigger filter once the value settles
+          setDebouncedPriceRange(priceRange);
+      }, DEBOUNCE_DELAY);
+
+      return () => clearTimeout(handler);
+  }, [priceRange]); // Dependency on raw priceRange from slider
+
+
+  // 3. Filtering and Total calculation (uses debounced range)
+  useEffect(() => {
+    const filtered = products.filter(
+        (p) => p.price >= debouncedPriceRange[0] && p.price <= debouncedPriceRange[1]
+    );
+    setFilteredProducts(filtered);
+    setTotal(filtered.length);
+  }, [debouncedPriceRange, products]);
+
+
+  // --- PARTIAL MATCH DETECTION LOGIC (remains the same) ---
+  const isPartialMatch = useMemo(() => {
+    if (!q || products.length === 0) return false;
+    const terms = q
+      .trim()
+      .toLowerCase()
+      .split(/\s+/)
+      .filter((t) => t.length > 0);
+    if (terms.length < 2) return false; 
+
+    const hasExactMatch = products.some((product) => {
+      const productText = [
+        product.name,
+        product.description,
+        product.brand,
+        product.category,
+        ...(product.tags || []),
+      ].join(" ").toLowerCase();
+      return terms.every((term) => {
+        const root = term.replace(/('s|s)$/, "");
+        return productText.includes(root);
+      });
+    });
+
+    return !hasExactMatch;
+  }, [q, products]);
+  // --------------------------------------------------------
 
   const handleSortChange = (value) => {
     setSortOption(value);
@@ -354,6 +387,7 @@ export default function ProductsPage() {
     return baseQuery;
   };
 
+  // 4. Data Fetching Effect (Handles Dynamic Max Price)
   useEffect(() => {
     async function fetchProducts() {
       setLoading(true);
@@ -389,14 +423,28 @@ export default function ProductsPage() {
         setProducts(items);
 
         if (items.length > 0) {
-          const prices = items.map((p) => p.price);
-          const minP = 0;
-          const maxP = Math.ceil(Math.max(...prices) / 100) * 100;
-          setSliderBounds({ min: minP, max: maxP });
-          if (priceRange[1] === 1000) setPriceRange([minP, maxP]);
+            const prices = items.map((p) => p.price);
+            const minP = 0;
+            const rawMaxPrice = Math.max(...prices);
+            
+            // Calculate round-up magnitude (e.g., if max is 1499, round to nearest 100)
+            const roundTo = Math.pow(10, Math.floor(Math.log10(rawMaxPrice)) - 1 || 1); 
+            const maxP = Math.ceil(rawMaxPrice / roundTo) * roundTo; 
+
+            const newBounds = { min: minP, max: maxP };
+            
+            // Reset bounds state
+            setSliderBounds(newBounds);
+            
+            // FIX: Always reset filter range to the full bounds when new product data loads due to a core filter change.
+            setPriceRange([minP, maxP]);
+            setDebouncedPriceRange([minP, maxP]); 
+
         } else {
-          setSliderBounds({ min: 0, max: 1000 });
-          setPriceRange([0, 1000]);
+            // Reset states for empty results
+            setSliderBounds({ min: 0, max: 1000 });
+            setPriceRange([0, 1000]);
+            setDebouncedPriceRange([0, 1000]);
         }
       } catch (error) {
         console.error("Failed to load products", error);
@@ -406,6 +454,7 @@ export default function ProductsPage() {
     }
 
     if (router.isReady) {
+      // This dependency array guarantees auto-refresh when any filter/sort value changes.
       fetchProducts();
     }
   }, [
@@ -419,14 +468,6 @@ export default function ProductsPage() {
     sortOption,
     userLocation,
   ]);
-
-  useEffect(() => {
-    const filtered = products.filter(
-      (p) => p.price >= priceRange[0] && p.price <= priceRange[1]
-    );
-    setFilteredProducts(filtered);
-    setTotal(filtered.length);
-  }, [priceRange, products]);
 
   const pageTitle = useMemo(() => {
     if (radius) return "Local Products";
@@ -506,16 +547,23 @@ export default function ProductsPage() {
               </ul>
             </div>
 
+            {/* Price Filter Section */}
             <FilterSection title="Price">
               <div className="px-1 pt-2">
                 <DualRangeSlider
+                  // CRITICAL FIX 3: Use key to force re-initialization when bounds change
+                  key={`${sliderBounds.min}-${sliderBounds.max}`}
                   min={sliderBounds.min}
                   max={sliderBounds.max}
-                  onChange={setPriceRange}
+                  // Pass initial state from the parent filter state
+                  initialMin={priceRange[0]}
+                  initialMax={priceRange[1]}
+                  onChange={handlePriceRangeChange}
                 />
                 <div className="flex items-center justify-between gap-4 font-bold text-black mt-3">
-                  <div>₹{priceRange[0]}</div>
-                  <div>₹{priceRange[1]}</div>
+                    {/* Display the debounced/filtered range */}
+                    <div>₹{debouncedPriceRange[0]}</div>
+                    <div>₹{debouncedPriceRange[1]}</div>
                 </div>
               </div>
             </FilterSection>
