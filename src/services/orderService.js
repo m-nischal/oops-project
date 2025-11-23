@@ -5,6 +5,7 @@ import User from "../models/User.js";
 import Delivery from "../models/deliveryModel.js"; 
 import InventoryService, { InsufficientStockError as InvInsufficientStockError } from "./inventory.js";
 import { sendEmail } from "../lib/mailer.js"; // <--- NEW IMPORT
+import { orderConfirmationEmailHtml } from "../lib/emailTemplates.js";
 
 /** Base order error */
 class OrderError extends Error {}
@@ -136,7 +137,22 @@ export default class OrderService {
       }
       throw err;
     }
-
+    try {
+      if (customer && customer.email && savedOrder) {
+         const emailHtml = orderConfirmationEmailHtml({ order: savedOrder });
+         
+         await sendEmail({
+           to: customer.email,
+           subject: `Order Confirmed - #${savedOrder._id.toString().slice(-6).toUpperCase()}`,
+           html: emailHtml,
+           text: `Your order #${savedOrder._id} has been confirmed. Total: ₹${savedOrder.total}`
+         });
+         console.log(`Confirmation email sent to ${customer.email}`);
+      }
+    } catch (emailErr) {
+      // Log but do not fail the order creation if email fails
+      console.error("Failed to send order confirmation email:", emailErr);
+    }
     // --- NEW LOGIC: Check for Proxy Orders (Negative Stock) & Notify Retailer ---
     // We run this AFTER the transaction commits so we don't block the user or fail the order if email fails.
     try {

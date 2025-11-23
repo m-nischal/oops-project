@@ -254,7 +254,7 @@ export default function DeliveryDetail({ order, onBack, onPickup, onStartDeliver
             </div>
 
             <p className="text-gray-500 text-sm mb-8 leading-relaxed">
-              Ask the customer for the 6-digit delivery PIN sent to their phone.
+              Ask the customer for the 4-digit delivery PIN sent to their email.
             </p>
 
             <div className="mb-8">
